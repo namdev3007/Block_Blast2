@@ -1,0 +1,51 @@
+.idea
+.snap
+Icon?
+Icon?.meta
+# =============== #
+# Unity generated #
+# =============== #
+Temp/
+Build/
+Assets/StreamingAssets/build_info
+Assets/StreamingAssets/build_info.meta
+Logs/
+Obj/
+obj/
+UnityGenerated/
+UserSettings/
+Library/
+/.vs
+
+# ===================================== #
+# Visual Studio / MonoDevelop generated #
+# ===================================== #
+ExportedObj/
+*.svd
+*.userprefs
+*.csproj
+*.pidb
+*.suo
+*.sln
+*.user
+*.unityproj
+*.booproj
+*.vsconfig
+
+# ============ #
+# OS generated #
+# ============ #
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+ehthumbs.db
+Thumbs.db
+
+# ============ #
+# Spriter      #
+# ============ #
+*.scml
+*.scml.meta
