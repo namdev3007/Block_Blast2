@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e3d2686b777de284b86c97932dfa283c, type: 3}
+  m_Name: Shape 2(1x2)
+  m_EditorClassIdentifier: 
+  blockSprite: {fileID: -6587464056177500159, guid: 411f265dd6381874d9fa985cdaa90fa8, type: 3}
+  columns: 1
+  rows: 2
+  board:
+  - column: 01
+  - column: 01
