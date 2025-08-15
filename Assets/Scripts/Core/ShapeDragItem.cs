@@ -10,7 +10,7 @@ public class ShapeDragItem : MonoBehaviour,
     [Header("Refs")]
     public ShapePalette palette;
     public int slotIndex;
-    public RectTransform dragRoot;   // RectTransform của Canvas (hoặc 1 lớp top-level)
+    public RectTransform dragRoot;   // RectTransform của Canvas/top-level
     public GridView gridView;
     public BoardRuntime board;
     public GridInput gridInput;
@@ -21,8 +21,8 @@ public class ShapeDragItem : MonoBehaviour,
     public Vector2 ghostSpacing = new Vector2(4, 4);
 
     [Header("Offsets")]
-    public Vector2 ghostOffsetLocal = Vector2.zero; // offset trong hệ local của dragRoot
-    public bool useGrabOffset = true;               // giữ điểm bấm ban đầu để ghost không "nhảy"
+    public Vector2 ghostOffsetLocal = Vector2.zero; // offset local của dragRoot
+    public bool useGrabOffset = true;               // giữ điểm bấm ban đầu
 
     private CanvasGroup _cg;
     private RectTransform _ghostRT;
@@ -30,7 +30,7 @@ public class ShapeDragItem : MonoBehaviour,
     private ShapeData _draggingData;
     private bool _isDragging;
     private Vector2 _grabOffsetLocal;
-    private Camera _cam;                            // camera của Canvas (Screen Space - Camera)
+    private Camera _cam;
 
     private void Awake()
     {
@@ -44,7 +44,6 @@ public class ShapeDragItem : MonoBehaviour,
 
     private Vector2 LocalToScreenDelta(Vector2 localDelta)
     {
-        // Chuyển một delta local (dragRoot) sang delta screen để bù cho raycast
         var w0 = dragRoot.TransformPoint(Vector3.zero);
         var w1 = dragRoot.TransformPoint((Vector3)localDelta);
         var s0 = RectTransformUtility.WorldToScreenPoint(_cam, w0);
@@ -52,15 +51,13 @@ public class ShapeDragItem : MonoBehaviour,
         return s1 - s0;
     }
 
-    // Ẩn slot ngay khi click
     public void OnPointerDown(PointerEventData eventData)
     {
         var data = palette.Peek(slotIndex);
         if (data == null) return;
-        _cg.alpha = 0f;
+        _cg.alpha = 0f; // ẩn slot gốc
     }
 
-    // Nếu chỉ click thả (không kéo), hiện lại
     public void OnPointerUp(PointerEventData eventData)
     {
         if (!_isDragging) _cg.alpha = 1f;
@@ -73,7 +70,7 @@ public class ShapeDragItem : MonoBehaviour,
 
         _isDragging = true;
         _cg.blocksRaycasts = false;
-        _cam = eventData.pressEventCamera; // quan trọng với Screen Space - Camera (Overlay -> null cũng OK)
+        _cam = eventData.pressEventCamera; // Screen Space - Camera (Overlay -> null)
 
         // tạo ghost
         _ghostView = Instantiate(ghostPrefab, dragRoot);
@@ -83,12 +80,12 @@ public class ShapeDragItem : MonoBehaviour,
         _ghostView.Render(_draggingData);
         SetGraphicsRaycastTarget(_ghostView.gameObject, false);
 
-        // đặt vị trí đầu theo điểm bấm + offset cấu hình
+        // vị trí đầu theo điểm bấm + offset cấu hình
         RectTransformUtility.ScreenPointToLocalPointInRectangle(
             dragRoot, eventData.position, _cam, out var startLocal);
         _ghostRT.anchoredPosition = startLocal + ghostOffsetLocal;
 
-        // grab offset để giữ điểm bấm (nếu bật)
+        // offset giữ điểm bấm
         _grabOffsetLocal = _ghostRT.anchoredPosition - startLocal;
     }
 
@@ -96,14 +93,14 @@ public class ShapeDragItem : MonoBehaviour,
     {
         if (_ghostRT == null) return;
 
-        // cập nhật vị trí ghost (local) + offset
+        // cập nhật ghost + offset
         RectTransformUtility.ScreenPointToLocalPointInRectangle(
             dragRoot, eventData.position, _cam, out var local);
         _ghostRT.anchoredPosition = local + TotalLocalOffset;
 
         if (_draggingData == null) { board.ClearPreview(); return; }
 
-        // dùng "con trỏ ảo" đã bù offset để raycast
+        // con trỏ ảo bù offset để raycast đúng ô
         var screenPosWithOffset = eventData.position + LocalToScreenDelta(TotalLocalOffset);
 
         if (!gridInput.TryGetCell(screenPosWithOffset, out var targetCell))
@@ -121,10 +118,7 @@ public class ShapeDragItem : MonoBehaviour,
             var sprite = _draggingData.blockSprite != null ? _draggingData.blockSprite : board.placedSprite;
             board.ShowPreview(_draggingData, anchorRow, anchorCol, sprite);
         }
-        else
-        {
-            board.ClearPreview();
-        }
+        else board.ClearPreview();
     }
 
     public void OnEndDrag(PointerEventData eventData)
@@ -136,9 +130,7 @@ public class ShapeDragItem : MonoBehaviour,
         if (_ghostRT != null) Destroy(_ghostRT.gameObject);
         _ghostRT = null; _ghostView = null;
 
-        // luôn clear preview khi thả
         board.ClearPreview();
-
         if (_draggingData == null) return;
 
         var screenPosWithOffset = eventData.position + LocalToScreenDelta(TotalLocalOffset);
@@ -156,7 +148,10 @@ public class ShapeDragItem : MonoBehaviour,
         {
             board.State.Place(_draggingData, anchorRow, anchorCol);
             var spriteToPaint = _draggingData.blockSprite != null ? _draggingData.blockSprite : null;
+
+            // Vẽ + flash viền trắng 1 lần (gọi trong PaintPlaced)
             board.PaintPlaced(_draggingData, anchorRow, anchorCol, spriteToPaint);
+
             palette.Consume(slotIndex);
         }
 

@@ -4,12 +4,11 @@ using UnityEngine;
 public class BoardRuntime : MonoBehaviour
 {
     public GridView gridView;
-    public Sprite placedSprite;          // sprite khi đặt xong
+    public Sprite placedSprite;                 // sprite fallback khi đặt
     [Range(0f, 1f)] public float previewAlpha = 0.35f;
 
     public BoardState State { get; private set; }
 
-    // lưu các index đang preview để clear
     private readonly List<int> _previewIdx = new();
 
     private void Awake()
@@ -21,12 +20,18 @@ public class BoardRuntime : MonoBehaviour
     public void PaintPlaced(ShapeData shape, int anchorRow, int anchorCol, Sprite overrideSprite = null)
     {
         var sprite = overrideSprite != null ? overrideSprite : placedSprite;
+
         foreach (var cell in shape.GetFilledCells())
         {
             int r = anchorRow + cell.x;
             int c = anchorCol + cell.y;
             var view = gridView.Cells[r * gridView.columns + c];
+
+            // đặt block
             view.SetOccupied(true, sprite);
+
+            // flash viền trắng 1 lần
+            view.PlayPlaceFlashOnce(); // mặc định 0.12s in, 0.18s out
         }
     }
 
