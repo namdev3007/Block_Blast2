@@ -116,9 +116,17 @@ public class ShapeDragItem : MonoBehaviour,
         if (board.State.CanPlace(_draggingData, anchorRow, anchorCol))
         {
             var sprite = _draggingData.blockSprite != null ? _draggingData.blockSprite : board.placedSprite;
+
+            // preview footprint (các ô của shape)
             board.ShowPreview(_draggingData, anchorRow, anchorCol, sprite);
+
+            // preview hàng/cột nếu sẽ hoàn thành
+            board.ShowLineCompletionPreview(_draggingData, anchorRow, anchorCol, sprite);
         }
-        else board.ClearPreview();
+        else
+        {
+            board.ClearPreview();
+        }
     }
 
     public void OnEndDrag(PointerEventData eventData)
@@ -130,7 +138,9 @@ public class ShapeDragItem : MonoBehaviour,
         if (_ghostRT != null) Destroy(_ghostRT.gameObject);
         _ghostRT = null; _ghostView = null;
 
+        // luôn clear preview khi thả
         board.ClearPreview();
+
         if (_draggingData == null) return;
 
         var screenPosWithOffset = eventData.position + LocalToScreenDelta(TotalLocalOffset);
@@ -149,7 +159,7 @@ public class ShapeDragItem : MonoBehaviour,
             board.State.Place(_draggingData, anchorRow, anchorCol);
             var spriteToPaint = _draggingData.blockSprite != null ? _draggingData.blockSprite : null;
 
-            // Vẽ + flash viền trắng 1 lần (gọi trong PaintPlaced)
+            // vẽ + flash viền trắng 1 lần/ô
             board.PaintPlaced(_draggingData, anchorRow, anchorCol, spriteToPaint);
 
             palette.Consume(slotIndex);
@@ -157,7 +167,6 @@ public class ShapeDragItem : MonoBehaviour,
 
         _draggingData = null;
     }
-
     private static void SetGraphicsRaycastTarget(GameObject root, bool value)
     {
         foreach (var g in root.GetComponentsInChildren<Graphic>(true))

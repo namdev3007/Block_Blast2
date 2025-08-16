@@ -2,13 +2,13 @@
 using UnityEngine.UI;
 using DG.Tweening; // DOTween cho flash viền
 
-
 public class GridSquareView : MonoBehaviour
 {
     [Header("UI")]
-    public Image hooverImage;   // overlay preview (trên cùng)
-    public Image activeImage;   // khi đã đặt
-    public Image normalImage;   // nền bình thường
+    public Image hoverImage;          // overlay preview footprint (các ô của shape)
+    public Image hoverPreviewImage;   // overlay preview HÀNG/CỘT hoàn thành
+    public Image activeImage;         // khi đã đặt
+    public Image normalImage;
     public Sprite defaultSprite;
 
     [Header("State")]
@@ -43,11 +43,18 @@ public class GridSquareView : MonoBehaviour
         }
         if (activeImage != null) activeImage.enabled = false;
 
-        if (hooverImage != null)
+        if (hoverImage != null)
         {
-            var c = hooverImage.color; c.a = hoverAlpha;
-            hooverImage.color = c;
-            hooverImage.enabled = false;
+            var c = hoverImage.color; c.a = hoverAlpha;
+            hoverImage.color = c;
+            hoverImage.enabled = false;
+            hoverImage.raycastTarget = false;
+        }
+
+        if (hoverPreviewImage != null)
+        {
+            hoverPreviewImage.enabled = false;
+            hoverPreviewImage.raycastTarget = false;
         }
 
         PrepareGlow();
@@ -89,10 +96,7 @@ public class GridSquareView : MonoBehaviour
         _glowTween = DOTween.Sequence()
             .Append(DOTween.To(() => _glow.effectColor, x => _glow.effectColor = x, full, fadeIn))
             .Append(DOTween.To(() => _glow.effectColor, x => _glow.effectColor = x, start, fadeOut))
-            .OnComplete(() =>
-            {
-                _glow.enabled = false;
-            })
+            .OnComplete(() => _glow.enabled = false)
             .SetTarget(this);
     }
 
@@ -108,32 +112,27 @@ public class GridSquareView : MonoBehaviour
                 activeImage.enabled = true;
             }
             if (normalImage != null) normalImage.enabled = false;
-            if (hooverImage != null) hooverImage.enabled = false;
+            if (hoverImage != null) hoverImage.enabled = false;
+            if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
             IsHovered = false;
-
-            // đảm bảo flash vẽ trên graphic đang hiển thị
-            PrepareGlow();
+            PrepareGlow(); // viền bám vào ảnh đang hiển thị
         }
         else
         {
             if (activeImage != null) activeImage.enabled = false;
-            if (normalImage != null)
-            {
-                normalImage.enabled = true;
-                normalImage.sprite = defaultSprite;
-            }
+            if (normalImage != null) { normalImage.enabled = true; normalImage.sprite = defaultSprite; }
             ApplyHoverVisual();
         }
     }
 
-    /// Preview bằng sprite (mờ). Chỉ hiện nếu chưa đặt.
+    /// Preview footprint (sprite mờ) – chỉ hiện nếu CHƯA đặt.
     public void SetHoverPreview(bool on, Sprite previewSprite = null, float? alpha = null)
     {
-        if (hooverImage == null) return;
+        if (hoverImage == null) return;
 
         if (IsOccupied)
         {
-            hooverImage.enabled = false;
+            hoverImage.enabled = false;
             IsHovered = false;
             return;
         }
@@ -141,25 +140,43 @@ public class GridSquareView : MonoBehaviour
         IsHovered = on;
         if (on)
         {
-            if (previewSprite != null) hooverImage.sprite = previewSprite;
-            var c = hooverImage.color;
-            c.a = Mathf.Clamp01(alpha.HasValue ? alpha.Value : hoverAlpha);
-            hooverImage.color = c;
-            hooverImage.enabled = true;
+            if (previewSprite != null) hoverImage.sprite = previewSprite;
+            var c = hoverImage.color;
+            c.a = Mathf.Clamp01(alpha ?? hoverAlpha);
+            hoverImage.color = c;
+            hoverImage.enabled = true;
         }
-        else hooverImage.enabled = false;
+        else hoverImage.enabled = false;
+    }
+
+    /// Preview HÀNG/CỘT hoàn thành – overlay mờ, **bỏ qua** trạng thái chiếm chỗ (phủ cả ô đã đặt).
+    public void SetLinePreview(bool on, Sprite previewSprite = null, float? alpha = null)
+    {
+        if (hoverPreviewImage == null) return;
+
+        if (on)
+        {
+            if (previewSprite != null) hoverPreviewImage.sprite = previewSprite;
+            var c = hoverPreviewImage.color;
+            hoverPreviewImage.color = c;
+            hoverPreviewImage.enabled = true;
+        }
+        else
+        {
+            hoverPreviewImage.enabled = false;
+        }
     }
 
     public void SetHover(bool on) => SetHoverPreview(on, null, null);
 
     private void ApplyHoverVisual()
     {
-        if (hooverImage == null) return;
-        hooverImage.enabled = !IsOccupied && IsHovered;
-        if (hooverImage.enabled)
+        if (hoverImage == null) return;
+        hoverImage.enabled = !IsOccupied && IsHovered;
+        if (hoverImage.enabled)
         {
-            var c = hooverImage.color; c.a = hoverAlpha;
-            hooverImage.color = c;
+            var c = hoverImage.color; c.a = hoverAlpha;
+            hoverImage.color = c;
         }
     }
 
@@ -181,9 +198,11 @@ public class GridSquareView : MonoBehaviour
 
         SetOccupied(false, null);
         SetHoverPreview(false, null, null);
+        SetLinePreview(false, null, null);
 
         if (normalImage != null) { normalImage.sprite = defaultSprite; normalImage.enabled = true; }
         if (activeImage != null) activeImage.enabled = false;
-        if (hooverImage != null) hooverImage.enabled = false;
+        if (hoverImage != null) hoverImage.enabled = false;
+        if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
     }
 }

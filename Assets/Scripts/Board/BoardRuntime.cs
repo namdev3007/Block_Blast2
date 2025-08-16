@@ -4,12 +4,14 @@ using UnityEngine;
 public class BoardRuntime : MonoBehaviour
 {
     public GridView gridView;
-    public Sprite placedSprite;                 // sprite fallback khi đặt
+    public Sprite placedSprite;                 // fallback khi đặt
     [Range(0f, 1f)] public float previewAlpha = 0.35f;
+    [Range(0f, 1f)] public float linePreviewAlpha = 0.25f;
 
     public BoardState State { get; private set; }
 
-    private readonly List<int> _previewIdx = new();
+    private readonly List<int> _previewIdx = new(); // footprint preview indices
+    private readonly List<int> _linePreviewIdx = new(); // row/col preview indices
 
     private void Awake()
     {
@@ -27,17 +29,15 @@ public class BoardRuntime : MonoBehaviour
             int c = anchorCol + cell.y;
             var view = gridView.Cells[r * gridView.columns + c];
 
-            // đặt block
             view.SetOccupied(true, sprite);
-
-            // flash viền trắng 1 lần
-            view.PlayPlaceFlashOnce(); // mặc định 0.12s in, 0.18s out
+            view.PlayPlaceFlashOnce(); // flash 1 lần màu trắng
         }
     }
 
+    // ==== PREVIEW (footprint) ====
     public void ShowPreview(ShapeData shape, int anchorRow, int anchorCol, Sprite previewSprite)
     {
-        ClearPreview();
+        ClearFootprintPreview();
         foreach (var cell in shape.GetFilledCells())
         {
             int r = anchorRow + cell.x;
@@ -49,14 +49,86 @@ public class BoardRuntime : MonoBehaviour
         }
     }
 
+    // ==== PREVIEW (row/col completion) ====
+    public void ShowLineCompletionPreview(ShapeData shape, int anchorRow, int anchorCol, Sprite previewSprite)
+    {
+        ClearLinePreview();
+
+        int W = gridView.columns, H = gridView.rows;
+        // đánh dấu các ô shape sẽ chiếm nếu đặt
+        bool[] proposed = new bool[W * H];
+        foreach (var cell in shape.GetFilledCells())
+        {
+            int r = anchorRow + cell.x;
+            int c = anchorCol + cell.y;
+            if (r >= 0 && r < H && c >= 0 && c < W)
+                proposed[r * W + c] = true;
+        }
+
+        var added = new HashSet<int>();
+
+        // hàng
+        for (int r = 0; r < H; r++)
+        {
+            int count = 0;
+            for (int c = 0; c < W; c++)
+                if (State.IsOccupied(r, c) || proposed[r * W + c]) count++;
+
+            if (count == W)
+            {
+                for (int c = 0; c < W; c++)
+                {
+                    int idx = r * W + c;
+                    if (added.Add(idx))
+                    {
+                        gridView.Cells[idx].SetLinePreview(true, previewSprite, linePreviewAlpha);
+                        _linePreviewIdx.Add(idx);
+                    }
+                }
+            }
+        }
+
+        // cột
+        for (int c = 0; c < W; c++)
+        {
+            int count = 0;
+            for (int r = 0; r < H; r++)
+                if (State.IsOccupied(r, c) || proposed[r * W + c]) count++;
+
+            if (count == H)
+            {
+                for (int r = 0; r < H; r++)
+                {
+                    int idx = r * W + c;
+                    if (added.Add(idx))
+                    {
+                        gridView.Cells[idx].SetLinePreview(true, previewSprite, linePreviewAlpha);
+                        _linePreviewIdx.Add(idx);
+                    }
+                }
+            }
+        }
+    }
+
     public void ClearPreview()
+    {
+        ClearFootprintPreview();
+        ClearLinePreview();
+    }
+
+    private void ClearFootprintPreview()
     {
         if (_previewIdx.Count == 0) return;
         foreach (var idx in _previewIdx)
-        {
-            var view = gridView.Cells[idx];
-            view.SetHoverPreview(false, null, null);
-        }
+            gridView.Cells[idx].SetHoverPreview(false, null, null);
         _previewIdx.Clear();
+    }
+
+    private void ClearLinePreview()
+    {
+        if (_linePreviewIdx.Count == 0) return;
+        foreach (var idx in _linePreviewIdx)
+            gridView.Cells[idx].SetLinePreview(false, null, null);
+        _linePreviewIdx.Clear();
     }
 }

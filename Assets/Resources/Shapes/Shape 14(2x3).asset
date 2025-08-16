@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e3d2686b777de284b86c97932dfa283c, type: 3}
   m_Name: Shape 14(2x3)
   m_EditorClassIdentifier: 
-  blockSprite: {fileID: 4751206505958359925, guid: 4afda0c8e64ee874eb170916f0c4feec, type: 3}
+  blockSprite: {fileID: -3625797914989604722, guid: 108dd06b11837af4daad247278dc4e8f, type: 3}
   columns: 2
   rows: 3
   board:
