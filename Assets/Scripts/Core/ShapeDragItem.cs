@@ -159,11 +159,13 @@ public class ShapeDragItem : MonoBehaviour,
             board.State.Place(_draggingData, anchorRow, anchorCol);
             var spriteToPaint = _draggingData.blockSprite != null ? _draggingData.blockSprite : null;
 
-            // vẽ + flash viền trắng 1 lần/ô
             board.PaintPlaced(_draggingData, anchorRow, anchorCol, spriteToPaint);
+
+            board.ResolveAndClearFullLinesAfterPlacement(_draggingData, anchorRow, anchorCol, spriteToPaint);
 
             palette.Consume(slotIndex);
         }
+
 
         _draggingData = null;
     }

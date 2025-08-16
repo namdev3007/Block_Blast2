@@ -30,6 +30,16 @@ public class GridSquareView : MonoBehaviour
     private Graphic _glowTarget;
     private Tween _glowTween;
 
+    private RectTransform _rt;
+    private Vector3 _initialScale;
+    private Tween _clearTween;
+
+    private void Awake()
+    {
+        _rt = (RectTransform)transform;
+        _initialScale = _rt.localScale;
+    }
+
     public void Init(int index, int row, int col, GridRegion region, Sprite overrideSprite = null)
     {
         Index = index; Row = row; Col = col; Region = region;
@@ -79,7 +89,6 @@ public class GridSquareView : MonoBehaviour
         }
     }
 
-    /// Flash viền màu trắng 1 lần: 0 -> 1 -> 0 rồi tắt.
     public void PlayPlaceFlashOnce(float fadeIn = 0.12f, float fadeOut = 0.18f)
     {
         if (_glowTarget == null) PrepareGlow();
@@ -125,7 +134,6 @@ public class GridSquareView : MonoBehaviour
         }
     }
 
-    /// Preview footprint (sprite mờ) – chỉ hiện nếu CHƯA đặt.
     public void SetHoverPreview(bool on, Sprite previewSprite = null, float? alpha = null)
     {
         if (hoverImage == null) return;
@@ -149,7 +157,6 @@ public class GridSquareView : MonoBehaviour
         else hoverImage.enabled = false;
     }
 
-    /// Preview HÀNG/CỘT hoàn thành – overlay mờ, **bỏ qua** trạng thái chiếm chỗ (phủ cả ô đã đặt).
     public void SetLinePreview(bool on, Sprite previewSprite = null, float? alpha = null)
     {
         if (hoverPreviewImage == null) return;
@@ -204,5 +211,45 @@ public class GridSquareView : MonoBehaviour
         if (activeImage != null) activeImage.enabled = false;
         if (hoverImage != null) hoverImage.enabled = false;
         if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
+    }
+    public void PlayClearPopAndReset(
+        float delay = 0f,
+        float popScale = 1.15f,
+        float popIn = 0.08f,
+        float fadeOut = 0.18f,
+        Ease popEaseIn = Ease.OutBack,
+        Ease popEaseOut = Ease.InBack
+    )
+    {
+        // nếu activeImage đang tắt, reset thẳng
+        if (activeImage == null || !activeImage.enabled)
+        {
+            ResetCell();
+            return;
+        }
+
+        // bảo đảm alpha=1 trước khi fade
+        var col = activeImage.color; col.a = 1f; activeImage.color = col;
+
+        // hủy tween cũ (nếu có)
+        _clearTween?.Kill();
+
+        // tạo sequence: delay -> pop in -> pop out + fade -> reset
+        _clearTween = DOTween.Sequence()
+            .AppendInterval(delay)
+            .Append(_rt.DOScale(_initialScale * popScale, popIn).SetEase(popEaseIn))
+            .Append(
+                DOTween.Sequence()
+                    .Join(_rt.DOScale(_initialScale, fadeOut).SetEase(popEaseOut))
+                    .Join(activeImage.DOFade(0f, fadeOut))
+            )
+            .OnComplete(() =>
+            {
+                // restore alpha & scale rồi reset
+                var c2 = activeImage.color; c2.a = 1f; activeImage.color = c2;
+                _rt.localScale = _initialScale;
+                ResetCell();
+            })
+            .SetTarget(this);
     }
 }

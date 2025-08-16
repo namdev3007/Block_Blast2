@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System.Collections.Generic;
+using UnityEngine;
 
 public class BoardState
 {
@@ -35,5 +36,56 @@ public class BoardState
             int c = anchorCol + cell.y;
             _occupied[r * Width + c] = true;
         }
+    }
+
+    // ====== NEW: line checks ======
+    public bool IsRowFull(int r)
+    {
+        for (int c = 0; c < Width; c++)
+            if (!_occupied[r * Width + c]) return false;
+        return true;
+    }
+
+    public bool IsColFull(int c)
+    {
+        for (int r = 0; r < Height; r++)
+            if (!_occupied[r * Width + c]) return false;
+        return true;
+    }
+
+    public List<int> GetFullRows()
+    {
+        var rows = new List<int>();
+        for (int r = 0; r < Height; r++)
+            if (IsRowFull(r)) rows.Add(r);
+        return rows;
+    }
+
+    public List<int> GetFullCols()
+    {
+        var cols = new List<int>();
+        for (int c = 0; c < Width; c++)
+            if (IsColFull(c)) cols.Add(c);
+        return cols;
+    }
+
+    public void ClearRow(int r)
+    {
+        for (int c = 0; c < Width; c++)
+            _occupied[r * Width + c] = false;
+    }
+
+    public void ClearCol(int c)
+    {
+        for (int r = 0; r < Height; r++)
+            _occupied[r * Width + c] = false;
+    }
+
+    public void ClearLines(IEnumerable<int> fullRows, IEnumerable<int> fullCols)
+    {
+        if (fullRows != null)
+            foreach (var r in fullRows) ClearRow(r);
+        if (fullCols != null)
+            foreach (var c in fullCols) ClearCol(c);
     }
 }
