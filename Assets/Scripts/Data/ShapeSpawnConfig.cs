@@ -3,69 +3,81 @@
 [System.Serializable]
 public struct ClassWeights
 {
-    [Range(0, 1)] public float small;   // 1–3 cells
-    [Range(0, 1)] public float medium;  // 4–5 cells
-    [Range(0, 1)] public float large;   // >=6 cells
-    [Range(0, 1)] public float line;    // 1xN hoặc Nx1 (>=3)
-    [Range(0, 1)] public float square;  // 2x2 full, 3x3 full...
+    [Range(0f, 5f), Tooltip("Weight for small shapes (1–3 cells).")]
+    public float small;
+    [Range(0f, 5f), Tooltip("Weight for medium shapes (4–5 cells).")]
+    public float medium;
+    [Range(0f, 5f), Tooltip("Weight for large shapes (6+ cells).")]
+    public float large;
+    [Range(0f, 5f), Tooltip("Weight for line shapes (1xN or Nx1).")]
+    public float line;
+    [Range(0f, 5f), Tooltip("Weight for full squares (2x2, 3x3).")]
+    public float square;
 
     public void Normalize()
     {
-        float s = small + medium + large + line + square;
-        if (s <= 0f) { small = 1; medium = large = line = square = 0; return; }
-        small /= s; medium /= s; large /= s; line /= s; square /= s;
+        float sum = small + medium + large + line + square;
+        if (sum <= 0f)
+        {
+            small = 1f; medium = 1f; large = 0.8f; line = 0.4f; square = 0.2f;
+            sum = small + medium + large + line + square;
+        }
+        small /= sum; medium /= sum; large /= sum; line /= sum; square /= sum;
     }
 }
 
-[System.Serializable]
-public class ShapeSpawnConfig
+[CreateAssetMenu(fileName = "ShapeSpawnConfig", menuName = "Config/Shape Spawn Config")]
+public class ShapeSpawnConfig : ScriptableObject
 {
-    [Header("Sampling")]
-    public int samplesPerSlot = 24;   // số ứng viên thử cho mỗi slot
-    public int topK = 5;              // roulette trong top K
+    [Header("Hand build / Sampling")]
+    [Min(1)] public int maxHandBuildAttempts = 25;
+    [Min(1)] public int samplesPerSlot = 30;
+    [Min(1)] public int topK = 4;
 
-    [Header("Solvability")]
-    [Tooltip("Số slot tối thiểu phải đặt được trong hand")]
-    public int requiredPlaceableSlots = 1;
-    public int maxHandBuildAttempts = 6;
+    [Header("Solvable Guard & Pity")]
+    [Min(0)] public int requiredPlaceableSlots = 1;
+    public bool enablePity = true;
+    [Min(0)] public int pityRescueSlots = 1;
 
-    [Header("Weights (base)")]
+    [Header("Bias: Line Chaser")]
+    [Range(0f, 1f)] public float forceLineClearChance = 0.2f;
+
+    [Header("DDA Base Weights (before adjustments)")]
     public ClassWeights baseWeights = new ClassWeights
     {
         small = 0.25f,
-        medium = 0.45f,
-        large = 0.20f,
-        line = 0.07f,
-        square = 0.03f
+        medium = 0.5f,
+        large = 0.2f,
+        line = 0.1f,
+        square = 0.0f
     };
 
-    [Header("DDA (theo trạng thái bàn)")]
-    [Tooltip("Khi freeRatio < ngưỡng -> bàn bí")]
-    public float tightBoardFreeThreshold = 0.35f;
-    [Tooltip("Booster khi bàn bí")]
-    public float tightSmallBoost = 1.35f;
-    public float tightLineBoost = 1.35f;
-    public float tightLargePenalty = 0.65f;
+    [Header("DDA: Tight Board Adjustments")]
+    [Range(0f, 1f)] public float tightBoardFreeThreshold = 0.35f;
+    [Range(0.5f, 2f)] public float tightSmallBoost = 1.15f;
+    [Range(0.5f, 2f)] public float tightLineBoost = 1.10f;
+    [Range(0.3f, 1.2f)] public float tightLargePenalty = 0.85f;
 
-    [Header("DDA (ramp theo thời gian chơi)")]
-    [Tooltip("Sau bao nhiêu lần refill thì đạt khó tối đa ~1.0")]
-    public int rampRefillsToMax = 20;
-    [Tooltip("Khi ramp tăng -> tăng trọng số large, giảm small")]
-    public float rampLargeBoost = 1.6f;
-    public float rampSmallPenalty = 0.75f;
+    [Header("DDA: Ramp over playtime (refill count)")]
+    [Min(1)] public int rampRefillsToMax = 30;
+    [Range(0.3f, 1f)] public float rampSmallPenalty = 0.7f;
+    [Range(1f, 2f)] public float rampLargeBoost = 1.3f;
 
-    [Header("Line-chaser bias")]
-    [Range(0, 1)] public float forceLineClearChance = 0.30f;
+    [Header("Scoring (shape candidate scoring)")]
+    public float wPlaceable = 2f;
+    public float wPlacementCount = 0.5f;
+    public int minPlacementsTarget = 2;
+    public int maxPlacementsTarget = 8;
+    public float wLineClear = 3f;
+    public float wArea = 0.05f;
 
-    [Header("Scoring (điều chỉnh độ khó)")]
-    public int minPlacementsTarget = 4;
-    public int maxPlacementsTarget = 14;
-    public float wPlaceable = 10f;
-    public float wPlacementCount = 0.8f;
-    public float wLineClear = 6f;
-    public float wArea = -0.15f;
+    [Header("Optional: Ramp Curves (alternative to linear ramp)")]
+    public AnimationCurve smallMulCurve = AnimationCurve.Linear(0, 1, 1, 0.7f);
+    public AnimationCurve largeMulCurve = AnimationCurve.Linear(0, 1, 1, 1.3f);
 
-    [Header("Pity / Rescue")]
-    public bool enablePity = true;
-    public int pityRescueSlots = 1;
+    private void OnValidate()
+    {
+        minPlacementsTarget = Mathf.Max(0, minPlacementsTarget);
+        maxPlacementsTarget = Mathf.Max(minPlacementsTarget, maxPlacementsTarget);
+    }
 }

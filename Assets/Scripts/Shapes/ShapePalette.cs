@@ -10,20 +10,41 @@ public class ShapePalette : MonoBehaviour
     public ShapeLibrary library;
     public List<ShapeItemView> slots = new List<ShapeItemView>();
     public BoardRuntime board;
-    public SkinProvider skinProvider;                 // <-- thêm
+    public SkinProvider skinProvider;
+
     [Header("Spawn Config")]
-    public ShapeSpawnConfig config = new ShapeSpawnConfig();
+    public ShapeSpawnConfig config;   // <-- DO NOT new here, assign via Inspector
+
     [Header("Anti-repeat")]
     public int historyKeep = 6;
 
-    private readonly List<ShapeData> _current = new();
-    private readonly Queue<ShapeData> _history = new();
-    private readonly List<int> _slotVariants = new(); // <-- variant per slot
+    private readonly List<ShapeData> _current = new List<ShapeData>();
+    private readonly Queue<ShapeData> _history = new Queue<ShapeData>();
+    private readonly List<int> _slotVariants = new List<int>();
     private System.Random _rng;
     private int _refillCount;
 
-    private void Awake() => _rng = new System.Random();
+    private void Awake()
+    {
+        _rng = new System.Random();
+
+        // Safe fallback if you forgot to assign an asset (runtime-only, not saved)
+        if (config == null)
+        {
+            Debug.LogWarning($"{name}: ShapeSpawnConfig is null. Creating a runtime instance (won't be saved).");
+            config = ScriptableObject.CreateInstance<ShapeSpawnConfig>();
+        }
+    }
+
     private void Start() => Refill();
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        if (config == null)
+            Debug.LogWarning($"{name}: Please assign a ShapeSpawnConfig asset in the Inspector.");
+    }
+#endif
 
     public void Refill()
     {
@@ -42,7 +63,7 @@ public class ShapePalette : MonoBehaviour
                 ? skinProvider.GetTileSprite(variant)
                 : (board != null ? board.placedSpriteFallback : null);
 
-            // vẽ slot bằng đúng sprite của skin
+            // Ensure ShapeItemView has Render(ShapeData, Sprite) overload (see below)
             slots[i].Render(_current[i], displaySprite);
 
             var cg = slots[i].GetComponentInParent<CanvasGroup>();
@@ -60,7 +81,6 @@ public class ShapePalette : MonoBehaviour
         return _current[slotIndex];
     }
 
-    // NEW: cho ShapeDragItem lấy đúng variant của slot
     public int PeekVariant(int slotIndex)
     {
         if (slotIndex < 0 || slotIndex >= _slotVariants.Count) return 0;
@@ -92,7 +112,7 @@ public class ShapePalette : MonoBehaviour
 
     private List<ShapeData> BuildHandSmart(int count)
     {
-        var state = board != null ? board.State : null;
+        var state = (board != null) ? board.State : null;
 
         for (int attempt = 0; attempt < config.maxHandBuildAttempts; attempt++)
         {
@@ -111,15 +131,12 @@ public class ShapePalette : MonoBehaviour
                 if (state == null || CountPlacements(pick, state) > 0) placeableSlots++;
             }
 
-            // Solvable guard
             if (placeableSlots >= Mathf.Max(0, config.requiredPlaceableSlots))
                 return hand;
         }
 
-        // Pity / Rescue
         if (!config.enablePity) return BuildFallbackRandom(count);
-
-        return BuildPityHand(count, board != null ? board.State : null);
+        return BuildPityHand(count, (board != null) ? board.State : null);
     }
 
     private List<ShapeData> BuildFallbackRandom(int count)
@@ -144,13 +161,11 @@ public class ShapePalette : MonoBehaviour
         return hand;
     }
 
-    // =============== DDA ===============
     private ClassWeights ComputeWeightsWithDDA()
     {
         var W = config.baseWeights;
         W.Normalize();
 
-        // 1) Board “tight”?
         bool tight = false;
         if (board != null && board.State != null)
         {
@@ -171,9 +186,7 @@ public class ShapePalette : MonoBehaviour
             W.large *= config.tightLargePenalty;
         }
 
-        // 2) Ramp khó dần theo số lần refill
         float t = Mathf.Clamp01(config.rampRefillsToMax <= 0 ? 1f : (float)_refillCount / config.rampRefillsToMax);
-        // Lerp multiplicative: small giảm dần, large tăng dần
         float smallMul = Mathf.Lerp(1f, config.rampSmallPenalty, t);
         float largeMul = Mathf.Lerp(1f, config.rampLargeBoost, t);
         W.small *= smallMul;
@@ -183,37 +196,25 @@ public class ShapePalette : MonoBehaviour
         return W;
     }
 
-    // =============== Pick 1 shape (smart) ===============
     private ShapeData PickOneShapeSmart(BoardState state, List<ShapeData> currentHand,
                                         ClassWeights weights, bool forceLine, bool mustBePlaceable)
     {
-        // 1) quyết định class mục tiêu theo weights
-        ShapeClass targetClass = RollClass(weights);
-
-        // nếu ép line-clear thì ưu tiên class Line trước
-        if (forceLine) targetClass = ShapeClass.Line;
+        ShapeClass targetClass = forceLine ? ShapeClass.Line : RollClass(weights);
 
         ShapeData best = null;
         float bestScore = float.NegativeInfinity;
         var top = new List<(ShapeData s, float score)>();
 
-        for (int t = 0; t < Mathf.Max(1, config.samplesPerSlot); t++)
+        int samples = Mathf.Max(1, config.samplesPerSlot);
+        for (int t = 0; t < samples; t++)
         {
             var cand = library.GetRandom();
             if (cand == null) continue;
-
-            // Anti-repeat nhẹ
             if (currentHand.Contains(cand)) continue;
             if (_history.Contains(cand)) continue;
 
-            // Lọc theo class bằng reject-sampling
-            if (Classify(cand) != targetClass)
-            {
-                // Cho phép 1 phần trăm lệch class để tránh kẹt tuyệt đối
-                if (_rng.NextDouble() > 0.15) continue;
-            }
+            if (Classify(cand) != targetClass && _rng.NextDouble() > 0.15) continue;
 
-            // Chấm điểm
             var eval = EvaluateShape(cand, state);
             if (mustBePlaceable && !eval.anyPlaceable) continue;
             if (forceLine && eval.maxLineClears <= 0) continue;
@@ -223,7 +224,6 @@ public class ShapePalette : MonoBehaviour
             if (top.Count < config.topK) top.Add((cand, score));
             else
             {
-                // replace min
                 int idxMin = 0; float min = top[0].score;
                 for (int i = 1; i < top.Count; i++)
                     if (top[i].score < min) { min = top[i].score; idxMin = i; }
@@ -235,7 +235,6 @@ public class ShapePalette : MonoBehaviour
 
         if (top.Count == 0)
         {
-            // fallback: thả lỏng constraint để không kẹt
             for (int i = 0; i < 50; i++)
             {
                 var s = library.GetRandom();
@@ -249,7 +248,6 @@ public class ShapePalette : MonoBehaviour
         return RoulettePick(top);
     }
 
-    // =============== Pity helper ===============
     private ShapeData PickSmallAndPlaceable(BoardState state)
     {
         for (int tries = 0; tries < 64; tries++)
@@ -262,7 +260,6 @@ public class ShapePalette : MonoBehaviour
         return library.GetRandom();
     }
 
-    // =============== Evaluation & scoring ===============
     private struct Eval
     {
         public int cells;
@@ -286,7 +283,6 @@ public class ShapePalette : MonoBehaviour
             {
                 if (!state.CanPlace(s, r, c)) continue;
                 e.placements++;
-
                 int clears = CountLinesCompletedIfPlaced(state, s, r, c);
                 if (clears > e.maxLineClears) e.maxLineClears = clears;
             }
@@ -302,12 +298,10 @@ public class ShapePalette : MonoBehaviour
         score += config.wLineClear * e.maxLineClears;
         score += config.wArea * e.cells;
 
-        // đa dạng nhẹ: phạt nếu đã có shape cùng area trong hand
         int sameArea = 0;
         foreach (var x in currentHand) if (x != null && CountCells(x) == e.cells) sameArea++;
         score -= 0.5f * sameArea;
 
-        // tie-break
         score += (float)_rng.NextDouble() * 0.01f;
         return score;
     }
@@ -315,8 +309,8 @@ public class ShapePalette : MonoBehaviour
     private float AdjustToTarget(int n, int lo, int hi)
     {
         if (n <= 0) return 0;
-        if (n >= lo && n <= hi) return n;       // thưởng đầy đủ trong vùng mục tiêu
-        int d = (n < lo) ? (lo - n) : (n - hi); // phạt theo khoảng cách
+        if (n >= lo && n <= hi) return n;
+        int d = (n < lo) ? (lo - n) : (n - hi);
         return Mathf.Max(0, n - d);
     }
 
@@ -359,7 +353,6 @@ public class ShapePalette : MonoBehaviour
         }
 
         int clears = 0;
-        // hàng
         for (int r = 0; r < H; r++)
         {
             bool full = true;
@@ -367,7 +360,6 @@ public class ShapePalette : MonoBehaviour
                 if (!proposed[r * W + c]) { full = false; break; }
             if (full) clears++;
         }
-        // cột
         for (int c = 0; c < W; c++)
         {
             bool full = true;
@@ -378,7 +370,6 @@ public class ShapePalette : MonoBehaviour
         return clears;
     }
 
-    // =============== Phân lớp shape & chọn class theo weight ===============
     private ShapeClass Classify(ShapeData s)
     {
         if (s == null || s.board == null) return ShapeClass.Small;
@@ -387,12 +378,8 @@ public class ShapePalette : MonoBehaviour
         int w = (b.maxC - b.minC + 1);
         int cells = CountCells(s);
 
-        // Line: 1xN hoặc Nx1 và cells == max(h,w)
         if ((h == 1 || w == 1) && cells >= 3) return ShapeClass.Line;
-
-        // Square đầy: 2x2, 3x3 (mọi ô true)
         if ((h == w) && (h == 2 || h == 3) && cells == h * w) return ShapeClass.Square;
-
         if (cells <= 3) return ShapeClass.Small;
         if (cells <= 5) return ShapeClass.Medium;
         return ShapeClass.Large;
@@ -400,7 +387,6 @@ public class ShapePalette : MonoBehaviour
 
     private ShapeClass RollClass(ClassWeights w)
     {
-        // đã Normalize
         float r = (float)_rng.NextDouble();
         if (r < w.small) return ShapeClass.Small; r -= w.small;
         if (r < w.medium) return ShapeClass.Medium; r -= w.medium;

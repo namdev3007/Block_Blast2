@@ -4,7 +4,7 @@
 public class BlockSkin : ScriptableObject
 {
     [Header("Tile variants (per-piece)")]
-    public Sprite[] tileVariants;        // ví dụ 6 sprite khác nhau cho 1 block
+    public Sprite[] tileVariants;       
 
     [Header("Board cell background (optional)")]
     public Sprite boardCellNormal;       // nếu muốn ô nền dùng sprite riêng

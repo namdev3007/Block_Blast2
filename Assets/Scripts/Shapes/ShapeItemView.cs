@@ -11,7 +11,7 @@ public class ShapeItemView : MonoBehaviour
     public ShapeData Current { get; private set; }
 
     private GridLayoutGroup _layout;
-    private readonly List<Image> _cells = new();
+    private readonly List<Image> _cells = new List<Image>();
 
     private void Awake()
     {
@@ -22,8 +22,11 @@ public class ShapeItemView : MonoBehaviour
         _layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
     }
 
-    // NEW: có tham số displaySprite (tùy chọn)
-    public void Render(ShapeData data, Sprite displaySprite = null)
+    // Overload cũ
+    public void Render(ShapeData data) => Render(data, null);
+
+    // Overload mới: truyền sprite hiển thị theo skin
+    public void Render(ShapeData data, Sprite overrideSprite)
     {
         Current = data;
         Clear();
@@ -36,7 +39,7 @@ public class ShapeItemView : MonoBehaviour
         int total = data.columns * data.rows;
         for (int i = 0; i < total; i++)
         {
-            var go = Instantiate(cellPrefab, transform);
+            var go = GameObject.Instantiate(cellPrefab, transform);
             var img = go.GetComponent<Image>();
             _cells.Add(img);
         }
@@ -49,8 +52,8 @@ public class ShapeItemView : MonoBehaviour
                 bool filled = data.board[r].column[c];
                 var img = _cells[idx];
                 img.enabled = filled;
-                if (filled && displaySprite != null)
-                    img.sprite = displaySprite;
+                if (filled && overrideSprite != null)
+                    img.sprite = overrideSprite;
             }
         }
 
@@ -61,7 +64,7 @@ public class ShapeItemView : MonoBehaviour
     {
         Current = null;
         for (int i = transform.childCount - 1; i >= 0; i--)
-            DestroyImmediate(transform.GetChild(i).gameObject);
+            GameObject.DestroyImmediate(transform.GetChild(i).gameObject);
         _cells.Clear();
     }
 }

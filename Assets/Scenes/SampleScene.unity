@@ -730,6 +730,51 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 0}
+--- !u!1 &806308581
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 806308583}
+  - component: {fileID: 806308582}
+  m_Layer: 0
+  m_Name: GameManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &806308582
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 806308581}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 322e46d08d4b95049affc9be07e59fac, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  current: {fileID: 11400000, guid: 4416589a9df95c84399bcfaefb1714c5, type: 2}
+--- !u!4 &806308583
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 806308581}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &985504611 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 7177092241030094303, guid: ef7db81921c852b489d538ba1bb5fa87, type: 3}
@@ -769,6 +814,7 @@ MonoBehaviour:
   gridView: {fileID: 1182179578}
   board: {fileID: 1182179580}
   gridInput: {fileID: 1182179579}
+  skinProvider: {fileID: 806308582}
   ghostPrefab: {fileID: 985504612}
   ghostCellSize: {x: 106, y: 106}
   ghostSpacing: {x: 0, y: 0}
@@ -900,8 +946,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   gridView: {fileID: 1182179578}
-  placedSprite: {fileID: -6587464056177500159, guid: 411f265dd6381874d9fa985cdaa90fa8, type: 3}
+  skin: {fileID: 806308582}
+  placedSpriteFallback: {fileID: 0}
   previewAlpha: 0.35
+  linePreviewAlpha: 0.25
+  clearFade: 0.15
 --- !u!1001 &1375355199
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1073,6 +1122,7 @@ MonoBehaviour:
   gridView: {fileID: 1182179578}
   board: {fileID: 1182179580}
   gridInput: {fileID: 1182179579}
+  skinProvider: {fileID: 806308582}
   ghostPrefab: {fileID: 1498768859}
   ghostCellSize: {x: 106, y: 106}
   ghostSpacing: {x: 0, y: 0}
@@ -1146,6 +1196,10 @@ MonoBehaviour:
   - {fileID: 1498768859}
   - {fileID: 985504612}
   - {fileID: 1754002289}
+  board: {fileID: 1182179580}
+  skinProvider: {fileID: 806308582}
+  config: {fileID: 11400000, guid: 781cf10c95630b0478e8d1052531b7b8, type: 2}
+  historyKeep: 6
 --- !u!1 &1632372286
 GameObject:
   m_ObjectHideFlags: 0
@@ -1261,6 +1315,7 @@ MonoBehaviour:
   gridView: {fileID: 1182179578}
   board: {fileID: 1182179580}
   gridInput: {fileID: 1182179579}
+  skinProvider: {fileID: 806308582}
   ghostPrefab: {fileID: 1754002289}
   ghostCellSize: {x: 106, y: 106}
   ghostSpacing: {x: 0, y: 0}
@@ -1416,5 +1471,6 @@ SceneRoots:
   m_Roots:
   - {fileID: 519420032}
   - {fileID: 619394802}
+  - {fileID: 806308583}
   - {fileID: 754991929}
   - {fileID: 260200458}

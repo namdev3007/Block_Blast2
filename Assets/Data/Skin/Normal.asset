@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e551467b5ae5d7e4cbd925ae4528102a, type: 3}
+  m_Name: Normal
+  m_EditorClassIdentifier: 
+  tileVariants:
+  - {fileID: 4751206505958359925, guid: 4afda0c8e64ee874eb170916f0c4feec, type: 3}
+  - {fileID: -6587464056177500159, guid: 411f265dd6381874d9fa985cdaa90fa8, type: 3}
+  - {fileID: 5088883946344990203, guid: 6754b5a8d50b71b4a87d06d6f278a4a1, type: 3}
+  - {fileID: -3625797914989604722, guid: 108dd06b11837af4daad247278dc4e8f, type: 3}
+  - {fileID: -4122914121141663201, guid: f1f6b29408c7caa43927e7e095295d4c, type: 3}
+  - {fileID: -7511209991240662178, guid: 11c7c423ea442774abbb6d17de66ed78, type: 3}
+  - {fileID: -7097640884233176908, guid: 316bd7491e818244397e7dad5b73c781, type: 3}
+  - {fileID: -6050924162551809754, guid: 948e2a8cac795f34295bc33c612e75a1, type: 3}
+  - {fileID: -6824788911104311842, guid: c5a36772c3c8dae46b95ea383bb117d4, type: 3}
+  boardCellNormal: {fileID: 0}
