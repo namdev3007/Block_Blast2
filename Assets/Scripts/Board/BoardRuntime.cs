@@ -4,12 +4,11 @@ using UnityEngine;
 public class BoardRuntime : MonoBehaviour
 {
     public GridView gridView;
-    public Sprite placedSprite;                 // sprite fallback khi đặt
+    public SkinProvider skin;                 // NEW
+    public Sprite placedSpriteFallback;       // fallback nếu chưa có skin
     [Range(0f, 1f)] public float previewAlpha = 0.35f;
     [Range(0f, 1f)] public float linePreviewAlpha = 0.25f;
-
-    [Header("Clear FX")]
-    public float clearFade = 0.15f;            // thời gian fade khi xóa
+    public float clearFade = 0.15f;
 
     public BoardState State { get; private set; }
 
@@ -22,43 +21,35 @@ public class BoardRuntime : MonoBehaviour
         State = new BoardState(gridView.columns, gridView.rows);
     }
 
-    public void PaintPlaced(ShapeData shape, int anchorRow, int anchorCol, Sprite overrideSprite = null)
+    private Sprite SpriteFromVariant(int variantIndex)
     {
-        var sprite = overrideSprite != null ? overrideSprite : placedSprite;
-
-        foreach (var cell in shape.GetFilledCells())
-        {
-            int r = anchorRow + cell.x;
-            int c = anchorCol + cell.y;
-            var view = gridView.Cells[r * gridView.columns + c];
-
-            view.SetOccupied(true, sprite);
-            view.PlayPlaceFlashOnce(); // flash 1 lần màu trắng khi snap
-        }
+        var s = skin ? skin.GetTileSprite(variantIndex) : null;
+        return s != null ? s : placedSpriteFallback;
     }
 
-    // ===== PREVIEW footprint =====
-    public void ShowPreview(ShapeData shape, int anchorRow, int anchorCol, Sprite previewSprite)
+    // ===== PREVIEW footprint (variant) =====
+    public void ShowPreviewVariant(ShapeData shape, int anchorRow, int anchorCol, int variantIndex)
     {
         ClearFootprintPreview();
+        var sprite = SpriteFromVariant(variantIndex);
         foreach (var cell in shape.GetFilledCells())
         {
             int r = anchorRow + cell.x;
             int c = anchorCol + cell.y;
             int idx = r * gridView.columns + c;
             var view = gridView.Cells[idx];
-            view.SetHoverPreview(true, previewSprite, previewAlpha);
+            view.SetHoverPreview(true, sprite, previewAlpha);
             _previewIdx.Add(idx);
         }
     }
 
-    // ===== PREVIEW row/col completion =====
-    public void ShowLineCompletionPreview(ShapeData shape, int anchorRow, int anchorCol, Sprite previewSprite)
+    // ===== PREVIEW row/col completion (variant) =====
+    public void ShowLineCompletionPreviewVariant(ShapeData shape, int anchorRow, int anchorCol, int variantIndex)
     {
         ClearLinePreview();
 
         int W = gridView.columns, H = gridView.rows;
-        bool[] proposed = new bool[W * H]; // footprint shape nếu đặt
+        bool[] proposed = new bool[W * H];
         foreach (var cell in shape.GetFilledCells())
         {
             int r = anchorRow + cell.x;
@@ -67,6 +58,7 @@ public class BoardRuntime : MonoBehaviour
                 proposed[r * W + c] = true;
         }
 
+        var sprite = SpriteFromVariant(variantIndex);
         var added = new HashSet<int>();
 
         // hàng
@@ -83,7 +75,7 @@ public class BoardRuntime : MonoBehaviour
                     int idx = r * W + c;
                     if (added.Add(idx))
                     {
-                        gridView.Cells[idx].SetLinePreview(true, previewSprite, linePreviewAlpha);
+                        gridView.Cells[idx].SetLinePreview(true, sprite, linePreviewAlpha);
                         _linePreviewIdx.Add(idx);
                     }
                 }
@@ -104,7 +96,7 @@ public class BoardRuntime : MonoBehaviour
                     int idx = r * W + c;
                     if (added.Add(idx))
                     {
-                        gridView.Cells[idx].SetLinePreview(true, previewSprite, linePreviewAlpha);
+                        gridView.Cells[idx].SetLinePreview(true, sprite, linePreviewAlpha);
                         _linePreviewIdx.Add(idx);
                     }
                 }
@@ -117,7 +109,6 @@ public class BoardRuntime : MonoBehaviour
         ClearFootprintPreview();
         ClearLinePreview();
     }
-
     private void ClearFootprintPreview()
     {
         if (_previewIdx.Count == 0) return;
@@ -125,7 +116,6 @@ public class BoardRuntime : MonoBehaviour
             gridView.Cells[idx].SetHoverPreview(false, null, null);
         _previewIdx.Clear();
     }
-
     private void ClearLinePreview()
     {
         if (_linePreviewIdx.Count == 0) return;
@@ -134,67 +124,74 @@ public class BoardRuntime : MonoBehaviour
         _linePreviewIdx.Clear();
     }
 
-public void ResolveAndClearFullLinesAfterPlacement(ShapeData shape, int anchorRow, int anchorCol, Sprite chosenSprite)
-{
-    int W = gridView.columns, H = gridView.rows;
-
-    // Chỉ check hàng/cột bị ảnh hưởng
-    var rowsToCheck = new HashSet<int>();
-    var colsToCheck = new HashSet<int>();
-    foreach (var cell in shape.GetFilledCells())
+    // ===== Đặt thật (variant) =====
+    public void PaintPlacedVariant(ShapeData shape, int anchorRow, int anchorCol, int variantIndex)
     {
-        int r = anchorRow + cell.x;
-        int c = anchorCol + cell.y;
-        if (r >= 0 && r < H) rowsToCheck.Add(r);
-        if (c >= 0 && c < W) colsToCheck.Add(c);
+        var sprite = SpriteFromVariant(variantIndex);
+        foreach (var cell in shape.GetFilledCells())
+        {
+            int r = anchorRow + cell.x;
+            int c = anchorCol + cell.y;
+            var view = gridView.Cells[r * gridView.columns + c];
+            view.SetOccupied(true, sprite);
+            view.PlayPlaceFlashOnce(); // nếu bạn đã có hàm này
+        }
     }
 
-    var fullRows = new List<int>();
-    foreach (var r in rowsToCheck) if (State.IsRowFull(r)) fullRows.Add(r);
-
-    var fullCols = new List<int>();
-    foreach (var c in colsToCheck) if (State.IsColFull(c)) fullCols.Add(c);
-
-    if (fullRows.Count == 0 && fullCols.Count == 0) return;
-
-    // Tắt preview trước khi chuyển sprite thật
-    ClearPreview();
-
-    // Gom mọi ô cần clear
-    var toClearIdx = new HashSet<int>();
-    foreach (var r in fullRows) for (int c = 0; c < W; c++) toClearIdx.Add(r * W + c);
-    foreach (var c in fullCols) for (int r = 0; r < H; r++) toClearIdx.Add(r * W + c);
-
-    // Đổi ngay sprite của tất cả ô thuộc line đầy (giữ nguyên yêu cầu của bạn)
-    var sprite = chosenSprite != null ? chosenSprite : placedSprite;
-    foreach (var idx in toClearIdx)
+    // ===== Clear các line full sau khi đặt (đổi sprite ngay rồi wave/fade) =====
+    public void ResolveAndClearFullLinesAfterPlacementVariant(ShapeData shape, int anchorRow, int anchorCol, int variantIndex)
     {
-        var view = gridView.Cells[idx];
-        view.SetOccupied(true, sprite);
+        int W = gridView.columns, H = gridView.rows;
+
+        var rowsToCheck = new HashSet<int>();
+        var colsToCheck = new HashSet<int>();
+        foreach (var cell in shape.GetFilledCells())
+        {
+            int r = anchorRow + cell.x;
+            int c = anchorCol + cell.y;
+            if (r >= 0 && r < H) rowsToCheck.Add(r);
+            if (c >= 0 && c < W) colsToCheck.Add(c);
+        }
+
+        var fullRows = new List<int>();
+        foreach (var r in rowsToCheck) if (State.IsRowFull(r)) fullRows.Add(r);
+
+        var fullCols = new List<int>();
+        foreach (var c in colsToCheck) if (State.IsColFull(c)) fullCols.Add(c);
+
+        if (fullRows.Count == 0 && fullCols.Count == 0) return;
+
+        ClearPreview();
+
+        var toClearIdx = new HashSet<int>();
+        foreach (var r in fullRows) for (int c = 0; c < W; c++) toClearIdx.Add(r * W + c);
+        foreach (var c in fullCols) for (int r = 0; r < H; r++) toClearIdx.Add(r * W + c);
+
+        // Đổi NGAY sang sprite variant chọn
+        var sprite = SpriteFromVariant(variantIndex);
+        foreach (var idx in toClearIdx)
+        {
+            var view = gridView.Cells[idx];
+            view.SetOccupied(true, sprite);
+        }
+
+        // Xóa trong STATE
+        State.ClearLines(fullRows, fullCols);
+
+        // Hiệu ứng clear (nếu bạn đã có Pop & Fade dạng wave)
+        const float step = 0.03f;
+        foreach (var idx in toClearIdx)
+        {
+            int r = idx / W;
+            int c = idx % W;
+
+            float dRow = fullRows.Contains(r) ? c * step : float.PositiveInfinity;
+            float dCol = fullCols.Contains(c) ? r * step : float.PositiveInfinity;
+            float delay = Mathf.Min(dRow, dCol);
+
+            // Nếu bạn có PlayClearPopAndReset:
+            gridView.Cells[idx].PlayClearPopAndReset(delay, 1.15f, 0.08f, 0.18f);
+            // Nếu không có hàm trên, bạn có thể gọi ResetCell() sau một coroutine/tween tuỳ ý.
+        }
     }
-
-    // Xóa trong STATE
-    State.ClearLines(fullRows, fullCols);
-
-    // Tính delay theo wave (row-first & col-first), lấy delay nhỏ nhất để wave trông đẹp
-    const float step = 0.03f; // khoảng cách thời gian giữa 2 ô liên tiếp
-    foreach (var idx in toClearIdx)
-    {
-        int r = idx / W;
-        int c = idx % W;
-
-        float dRow = float.PositiveInfinity;
-        if (fullRows.Contains(r)) dRow = c * step;      // wave chạy theo cột trong hàng r
-
-        float dCol = float.PositiveInfinity;
-        if (fullCols.Contains(c)) dCol = r * step;      // wave chạy theo hàng trong cột c
-
-        float delay = Mathf.Min(dRow, dCol);
-
-        // Gọi hiệu ứng Pop + Fade (nổi bật) theo delay đã tính
-        gridView.Cells[idx].PlayClearPopAndReset(delay, popScale: 1.15f, popIn: 0.08f, fadeOut: 0.18f);
-    }
-}
-
-
 }

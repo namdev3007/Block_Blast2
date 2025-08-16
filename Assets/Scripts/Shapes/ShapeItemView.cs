@@ -5,7 +5,7 @@ using UnityEngine.UI;
 public class ShapeItemView : MonoBehaviour
 {
     [Header("UI")]
-    public GameObject cellPrefab;   
+    public GameObject cellPrefab;
     public Vector2 cellSize = new Vector2(64, 64);
     public Vector2 spacing = new Vector2(4, 4);
     public ShapeData Current { get; private set; }
@@ -22,7 +22,8 @@ public class ShapeItemView : MonoBehaviour
         _layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
     }
 
-    public void Render(ShapeData data)
+    // NEW: có tham số displaySprite (tùy chọn)
+    public void Render(ShapeData data, Sprite displaySprite = null)
     {
         Current = data;
         Clear();
@@ -40,7 +41,6 @@ public class ShapeItemView : MonoBehaviour
             _cells.Add(img);
         }
 
-        // tô ô theo matrix
         for (int r = 0; r < data.rows; r++)
         {
             for (int c = 0; c < data.columns; c++)
@@ -48,9 +48,9 @@ public class ShapeItemView : MonoBehaviour
                 int idx = r * data.columns + c;
                 bool filled = data.board[r].column[c];
                 var img = _cells[idx];
-                img.enabled = filled;              // tắt/bật ô cho gọn
-                if (filled && data.blockSprite)    // nếu có sprite riêng cho block
-                    img.sprite = data.blockSprite;
+                img.enabled = filled;
+                if (filled && displaySprite != null)
+                    img.sprite = displaySprite;
             }
         }
 

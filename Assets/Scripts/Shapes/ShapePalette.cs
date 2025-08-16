@@ -9,43 +9,42 @@ public class ShapePalette : MonoBehaviour
     [Header("Refs")]
     public ShapeLibrary library;
     public List<ShapeItemView> slots = new List<ShapeItemView>();
-    public BoardRuntime board;                  // để đọc BoardState
-
+    public BoardRuntime board;
+    public SkinProvider skinProvider;                 // <-- thêm
     [Header("Spawn Config")]
     public ShapeSpawnConfig config = new ShapeSpawnConfig();
-
     [Header("Anti-repeat")]
     public int historyKeep = 6;
 
-    private readonly List<ShapeData> _current = new List<ShapeData>();
-    private readonly Queue<ShapeData> _history = new Queue<ShapeData>();
+    private readonly List<ShapeData> _current = new();
+    private readonly Queue<ShapeData> _history = new();
+    private readonly List<int> _slotVariants = new(); // <-- variant per slot
     private System.Random _rng;
-    private int _refillCount; // dùng cho ramp khó dần
+    private int _refillCount;
 
-    private void Awake()
-    {
-        _rng = new System.Random();
-    }
+    private void Awake() => _rng = new System.Random();
+    private void Start() => Refill();
 
-    private void Start()
-    {
-        Refill();
-    }
-
-    // ================= API gốc =================
     public void Refill()
     {
         if (library == null || slots == null || slots.Count == 0) return;
 
         var hand = BuildHandSmart(slots.Count);
-        _current.Clear();
-        _current.AddRange(hand);
+        _current.Clear(); _current.AddRange(hand);
 
+        _slotVariants.Clear();
         for (int i = 0; i < slots.Count; i++)
         {
-            slots[i].Render(_current[i]);
+            int variant = (skinProvider != null) ? skinProvider.RollVariant() : 0;
+            _slotVariants.Add(variant);
 
-            // đảm bảo slot hiện lại
+            Sprite displaySprite = (skinProvider != null)
+                ? skinProvider.GetTileSprite(variant)
+                : (board != null ? board.placedSpriteFallback : null);
+
+            // vẽ slot bằng đúng sprite của skin
+            slots[i].Render(_current[i], displaySprite);
+
             var cg = slots[i].GetComponentInParent<CanvasGroup>();
             if (cg) cg.alpha = 1f;
         }
@@ -61,16 +60,24 @@ public class ShapePalette : MonoBehaviour
         return _current[slotIndex];
     }
 
+    // NEW: cho ShapeDragItem lấy đúng variant của slot
+    public int PeekVariant(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= _slotVariants.Count) return 0;
+        return _slotVariants[slotIndex];
+    }
+
     public void Consume(int slotIndex)
     {
         if (slotIndex < 0 || slotIndex >= _current.Count) return;
         if (_current[slotIndex] == null) return;
 
-        // lưu lịch sử nhẹ (giảm lặp)
         _history.Enqueue(_current[slotIndex]);
         while (_history.Count > historyKeep) _history.Dequeue();
 
         _current[slotIndex] = null;
+        if (slotIndex < _slotVariants.Count) _slotVariants[slotIndex] = 0;
+
         if (slots[slotIndex] != null) slots[slotIndex].Clear();
 
         if (AllConsumed()) Refill();
@@ -83,7 +90,6 @@ public class ShapePalette : MonoBehaviour
         return true;
     }
 
-    // =============== Core: hand thông minh ===============
     private List<ShapeData> BuildHandSmart(int count)
     {
         var state = board != null ? board.State : null;

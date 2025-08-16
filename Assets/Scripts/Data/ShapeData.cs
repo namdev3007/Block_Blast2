@@ -13,9 +13,7 @@ public class ShapeData : ScriptableObject
         public void ClearRow() { for (int i = 0; i < column.Length; i++) column[i] = false; }
     }
 
-    [Header("Visual")]
-    public Sprite blockSprite;
-
+    [Header("Grid")]
     public int columns = 0;
     public int rows = 0;
     public Row[] board;
@@ -31,5 +29,29 @@ public class ShapeData : ScriptableObject
     {
         board = new Row[rows];
         for (int i = 0; i < rows; i++) board[i] = new Row(columns);
+    }
+
+    public System.Collections.Generic.IEnumerable<Vector2Int> GetFilledCells()
+    {
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < columns; c++)
+                if (board[r].column[c]) yield return new Vector2Int(r, c);
+    }
+    public (int minR, int minC, int maxR, int maxC) GetBounds()
+    {
+        int minR = int.MaxValue, minC = int.MaxValue, maxR = int.MinValue, maxC = int.MinValue;
+        bool any = false;
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < columns; c++)
+                if (board[r].column[c])
+                {
+                    any = true;
+                    if (r < minR) minR = r;
+                    if (c < minC) minC = c;
+                    if (r > maxR) maxR = r;
+                    if (c > maxC) maxC = c;
+                }
+        if (!any) return (0, 0, -1, -1);
+        return (minR, minC, maxR, maxC);
     }
 }
