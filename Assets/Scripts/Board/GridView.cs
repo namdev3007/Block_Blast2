@@ -149,4 +149,35 @@ public class GridView : MonoBehaviour
         if (!isTop && isLeft) return GridRegion.BottomLeft;
         return GridRegion.BottomRight;
     }
+    public bool TryGetSquareCenterWorld(int row, int col, out Vector3 world)
+    {
+        world = default;
+
+        var cell = GetCell(row, col);
+        if (cell == null) return false;
+
+        var rt = cell.GetComponent<RectTransform>();
+        if (rt == null) return false;
+
+        world = rt.TransformPoint((Vector3)rt.rect.center);
+        return true;
+    }
+    public bool TryGetSquareCenterScreen(int row, int col, Camera uiCamera, out Vector2 screen)
+    {
+        screen = default;
+
+        var cell = GetCell(row, col);
+        if (cell == null) return false;
+
+        var rt = cell.GetComponent<RectTransform>();
+        if (rt == null) return false;
+
+        // Tâm local của rect
+        Vector3 localCenter = (Vector3)rt.rect.center;
+        // Đổi sang world
+        Vector3 world = rt.TransformPoint(localCenter);
+        // World -> screen (uiCamera có thể null nếu Canvas Overlay)
+        screen = RectTransformUtility.WorldToScreenPoint(uiCamera, world);
+        return true;
+    }
 }

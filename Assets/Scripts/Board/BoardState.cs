@@ -5,15 +5,20 @@ public class BoardState
 {
     public readonly int Width;
     public readonly int Height;
-    private readonly bool[] _occupied;
+    private readonly bool[] _occupied; // r*Width + c
 
     public BoardState(int width, int height)
     {
-        Width = width; Height = height;
+        Width = width;
+        Height = height;
         _occupied = new bool[width * height];
     }
 
-    public bool IsOccupied(int r, int c) => _occupied[r * Width + c];
+    public bool IsOccupied(int r, int c)
+    {
+        if (r < 0 || r >= Height || c < 0 || c >= Width) return false;
+        return _occupied[r * Width + c];
+    }
 
     public bool CanPlace(ShapeData shape, int anchorRow, int anchorCol)
     {
@@ -38,7 +43,7 @@ public class BoardState
         }
     }
 
-    // ====== NEW: line checks ======
+    // ====== Line checks ======
     public bool IsRowFull(int r)
     {
         for (int c = 0; c < Width; c++)
@@ -87,5 +92,12 @@ public class BoardState
             foreach (var r in fullRows) ClearRow(r);
         if (fullCols != null)
             foreach (var c in fullCols) ClearCol(c);
+    }
+
+    // ✅ API set hợp lệ cho seed
+    public void SetOccupied(int r, int c, bool value)
+    {
+        if (r < 0 || r >= Height || c < 0 || c >= Width) return;
+        _occupied[r * Width + c] = value;
     }
 }

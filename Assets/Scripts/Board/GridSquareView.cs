@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 using UnityEngine.UI;
-using DG.Tweening; // DOTween cho flash viền
+using DG.Tweening; // DOTween cho flash viền & wave
 
 public class GridSquareView : MonoBehaviour
 {
@@ -10,6 +10,10 @@ public class GridSquareView : MonoBehaviour
     public Image activeImage;         // khi đã đặt
     public Image normalImage;
     public Sprite defaultSprite;
+
+    // NEW: overlay riêng cho intro wave (kéo thả trong prefab)
+    [Header("Intro Wave")]
+    public Image introWaveImage;
 
     [Header("State")]
     [Range(0f, 1f)] public float hoverAlpha = 0.35f;
@@ -33,6 +37,7 @@ public class GridSquareView : MonoBehaviour
     private RectTransform _rt;
     private Vector3 _initialScale;
     private Tween _clearTween;
+    private Sequence _seq;
 
     private void Awake()
     {
@@ -65,6 +70,15 @@ public class GridSquareView : MonoBehaviour
         {
             hoverPreviewImage.enabled = false;
             hoverPreviewImage.raycastTarget = false;
+        }
+
+        // intro wave overlay tắt mặc định
+        if (introWaveImage != null)
+        {
+            var c2 = introWaveImage.color; c2.a = 0f;
+            introWaveImage.color = c2;
+            introWaveImage.enabled = false;
+            introWaveImage.raycastTarget = false;
         }
 
         PrepareGlow();
@@ -123,13 +137,15 @@ public class GridSquareView : MonoBehaviour
             if (normalImage != null) normalImage.enabled = false;
             if (hoverImage != null) hoverImage.enabled = false;
             if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
+
             IsHovered = false;
-            PrepareGlow(); // viền bám vào ảnh đang hiển thị
+            PrepareGlow();
         }
         else
         {
             if (activeImage != null) activeImage.enabled = false;
             if (normalImage != null) { normalImage.enabled = true; normalImage.sprite = defaultSprite; }
+
             ApplyHoverVisual();
         }
     }
@@ -137,7 +153,6 @@ public class GridSquareView : MonoBehaviour
     public void SetHoverPreview(bool on, Sprite previewSprite = null, float? alpha = null)
     {
         if (hoverImage == null) return;
-
         if (IsOccupied)
         {
             hoverImage.enabled = false;
@@ -149,28 +164,40 @@ public class GridSquareView : MonoBehaviour
         if (on)
         {
             if (previewSprite != null) hoverImage.sprite = previewSprite;
-            var c = hoverImage.color;
-            c.a = Mathf.Clamp01(alpha ?? hoverAlpha);
+            var c = hoverImage.color; c.a = Mathf.Clamp01(alpha ?? hoverAlpha);
             hoverImage.color = c;
             hoverImage.enabled = true;
+
+            if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
         }
-        else hoverImage.enabled = false;
+        else
+        {
+            hoverImage.enabled = false;
+        }
     }
 
     public void SetLinePreview(bool on, Sprite previewSprite = null, float? alpha = null)
     {
         if (hoverPreviewImage == null) return;
 
+        if (hoverImage != null && hoverImage.enabled)
+        {
+            hoverPreviewImage.enabled = false;
+            return;
+        }
+
         if (on)
         {
             if (previewSprite != null) hoverPreviewImage.sprite = previewSprite;
-            var c = hoverPreviewImage.color;
-            hoverPreviewImage.color = c;
             hoverPreviewImage.enabled = true;
+
+            if (activeImage != null && activeImage.enabled) activeImage.enabled = false; // ẩn tạm
         }
         else
         {
             hoverPreviewImage.enabled = false;
+
+            if (IsOccupied && activeImage != null) activeImage.enabled = true; // khôi phục
         }
     }
 
@@ -211,7 +238,15 @@ public class GridSquareView : MonoBehaviour
         if (activeImage != null) activeImage.enabled = false;
         if (hoverImage != null) hoverImage.enabled = false;
         if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
+
+        if (introWaveImage != null)
+        {
+            var c2 = introWaveImage.color; c2.a = 0f;
+            introWaveImage.color = c2;
+            introWaveImage.enabled = false;
+        }
     }
+
     public void PlayClearPopAndReset(
         float delay = 0f,
         float popScale = 1.15f,
@@ -221,20 +256,15 @@ public class GridSquareView : MonoBehaviour
         Ease popEaseOut = Ease.InBack
     )
     {
-        // nếu activeImage đang tắt, reset thẳng
         if (activeImage == null || !activeImage.enabled)
         {
             ResetCell();
             return;
         }
 
-        // bảo đảm alpha=1 trước khi fade
         var col = activeImage.color; col.a = 1f; activeImage.color = col;
-
-        // hủy tween cũ (nếu có)
         _clearTween?.Kill();
 
-        // tạo sequence: delay -> pop in -> pop out + fade -> reset
         _clearTween = DOTween.Sequence()
             .AppendInterval(delay)
             .Append(_rt.DOScale(_initialScale * popScale, popIn).SetEase(popEaseIn))
@@ -245,10 +275,82 @@ public class GridSquareView : MonoBehaviour
             )
             .OnComplete(() =>
             {
-                // restore alpha & scale rồi reset
                 var c2 = activeImage.color; c2.a = 1f; activeImage.color = c2;
                 _rt.localScale = _initialScale;
                 ResetCell();
+            })
+            .SetTarget(this);
+    }
+
+    public void PlayClearBump(float scaleUp = 1.2f, float upTime = 0.12f,
+                              float downTime = 0.10f, Ease upEase = Ease.OutBack, Ease downEase = Ease.InSine)
+    {
+        _seq?.Kill();
+        transform.localScale = Vector3.one;
+
+        _seq = DOTween.Sequence()
+            .SetAutoKill(true)
+            .OnKill(() => _seq = null);
+
+        _seq.Append(transform.DOScale(scaleUp, upTime).SetEase(upEase));
+        _seq.Append(transform.DOScale(1f, downTime).SetEase(downEase));
+    }
+
+    void OnDisable()
+    {
+        _seq?.Kill();
+        _clearTween?.Kill();
+        _glowTween?.Kill();
+        DOTween.Kill(this);
+    }
+
+    public void PlayIntroWave(
+        Sprite spriteForWave,
+        Color? tint,
+        float delay,
+        float fadeIn = 0.18f,
+        float hold = 0.06f,
+        float fadeOut = 0.25f,
+        float risePixels = 14f,
+        Ease easeIn = Ease.OutSine,
+        Ease easeOut = Ease.InSine
+    )
+    {
+        if (IsOccupied) return;
+
+        var img = introWaveImage != null ? introWaveImage
+                 : (hoverPreviewImage != null ? hoverPreviewImage : normalImage);
+        if (img == null) return;
+
+        if (spriteForWave != null) img.sprite = spriteForWave;
+
+        var baseColor = tint ?? Color.white;
+        baseColor.a = 0f;
+
+        img.enabled = true;
+        img.color = baseColor;
+
+        var rt = img.rectTransform;
+        Vector2 basePos = rt.anchoredPosition;
+
+        DOTween.Kill(img);
+        DOTween.Kill(rt);
+
+        DOTween.Sequence()
+            .AppendInterval(delay)
+            .AppendCallback(() =>
+            {
+                rt.anchoredPosition = basePos - new Vector2(0f, risePixels);
+            })
+            .Append(img.DOFade(1f, fadeIn).SetEase(easeIn))
+            .Join(rt.DOAnchorPos(basePos, fadeIn).SetEase(easeIn))
+            .AppendInterval(hold)
+            .Append(img.DOFade(0f, fadeOut).SetEase(easeOut))
+            .OnComplete(() =>
+            {
+                img.enabled = false;
+                var c = img.color; c.a = 1f; img.color = c;
+                rt.anchoredPosition = basePos;
             })
             .SetTarget(this);
     }
