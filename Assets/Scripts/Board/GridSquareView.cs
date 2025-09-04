@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 using UnityEngine.UI;
-using DG.Tweening; // DOTween cho flash viền & wave
+using DG.Tweening; // DOTween cho flash viền
 
 public class GridSquareView : MonoBehaviour
 {
@@ -10,6 +10,8 @@ public class GridSquareView : MonoBehaviour
     public Image activeImage;         // khi đã đặt
     public Image normalImage;
     public Sprite defaultSprite;
+    private bool _linePreviewOn;
+    private bool _activeHiddenByLinePreview;
 
     // NEW: overlay riêng cho intro wave (kéo thả trong prefab)
     [Header("Intro Wave")]
@@ -37,12 +39,26 @@ public class GridSquareView : MonoBehaviour
     private RectTransform _rt;
     private Vector3 _initialScale;
     private Tween _clearTween;
-    private Sequence _seq;
+
+    // NEW: tween cho intro
+    private Tween _introTween;
+
+    Sequence _seq;
 
     private void Awake()
     {
         _rt = (RectTransform)transform;
         _initialScale = _rt.localScale;
+
+        // đảm bảo introWaveImage init đúng
+        if (introWaveImage)
+        {
+            var c = introWaveImage.color; c.a = 0f;
+            introWaveImage.color = c;
+            introWaveImage.raycastTarget = false;
+            introWaveImage.enabled = true; // để sẵn, alpha = 0
+            introWaveImage.preserveAspect = true;
+        }
     }
 
     public void Init(int index, int row, int col, GridRegion region, Sprite overrideSprite = null)
@@ -72,13 +88,13 @@ public class GridSquareView : MonoBehaviour
             hoverPreviewImage.raycastTarget = false;
         }
 
-        // intro wave overlay tắt mặc định
-        if (introWaveImage != null)
+        // reset intro overlay
+        if (introWaveImage)
         {
-            var c2 = introWaveImage.color; c2.a = 0f;
-            introWaveImage.color = c2;
-            introWaveImage.enabled = false;
-            introWaveImage.raycastTarget = false;
+            var cc = introWaveImage.color; cc.a = 0f;
+            introWaveImage.color = cc;
+            introWaveImage.enabled = true;
+            introWaveImage.preserveAspect = true;
         }
 
         PrepareGlow();
@@ -138,6 +154,9 @@ public class GridSquareView : MonoBehaviour
             if (hoverImage != null) hoverImage.enabled = false;
             if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
 
+            _linePreviewOn = false;
+            _activeHiddenByLinePreview = false;
+
             IsHovered = false;
             PrepareGlow();
         }
@@ -146,6 +165,9 @@ public class GridSquareView : MonoBehaviour
             if (activeImage != null) activeImage.enabled = false;
             if (normalImage != null) { normalImage.enabled = true; normalImage.sprite = defaultSprite; }
 
+            _linePreviewOn = false;
+            _activeHiddenByLinePreview = false;
+
             ApplyHoverVisual();
         }
     }
@@ -153,6 +175,7 @@ public class GridSquareView : MonoBehaviour
     public void SetHoverPreview(bool on, Sprite previewSprite = null, float? alpha = null)
     {
         if (hoverImage == null) return;
+
         if (IsOccupied)
         {
             hoverImage.enabled = false;
@@ -169,6 +192,7 @@ public class GridSquareView : MonoBehaviour
             hoverImage.enabled = true;
 
             if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
+            RestoreActiveIfHiddenByLinePreview();
         }
         else
         {
@@ -183,6 +207,7 @@ public class GridSquareView : MonoBehaviour
         if (hoverImage != null && hoverImage.enabled)
         {
             hoverPreviewImage.enabled = false;
+            RestoreActiveIfHiddenByLinePreview();
             return;
         }
 
@@ -190,14 +215,12 @@ public class GridSquareView : MonoBehaviour
         {
             if (previewSprite != null) hoverPreviewImage.sprite = previewSprite;
             hoverPreviewImage.enabled = true;
-
-            if (activeImage != null && activeImage.enabled) activeImage.enabled = false; // ẩn tạm
+            HideActiveForLinePreview();
         }
         else
         {
             hoverPreviewImage.enabled = false;
-
-            if (IsOccupied && activeImage != null) activeImage.enabled = true; // khôi phục
+            RestoreActiveIfHiddenByLinePreview();
         }
     }
 
@@ -230,6 +253,9 @@ public class GridSquareView : MonoBehaviour
             _glow.enabled = false;
         }
 
+        _linePreviewOn = false;
+        _activeHiddenByLinePreview = false;
+
         SetOccupied(false, null);
         SetHoverPreview(false, null, null);
         SetLinePreview(false, null, null);
@@ -239,11 +265,12 @@ public class GridSquareView : MonoBehaviour
         if (hoverImage != null) hoverImage.enabled = false;
         if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
 
-        if (introWaveImage != null)
+        // reset intro layer
+        if (introWaveImage)
         {
-            var c2 = introWaveImage.color; c2.a = 0f;
-            introWaveImage.color = c2;
-            introWaveImage.enabled = false;
+            _introTween?.Kill();
+            var cc = introWaveImage.color; cc.a = 0f;
+            introWaveImage.color = cc;
         }
     }
 
@@ -282,8 +309,9 @@ public class GridSquareView : MonoBehaviour
             .SetTarget(this);
     }
 
-    public void PlayClearBump(float scaleUp = 1.2f, float upTime = 0.12f,
-                              float downTime = 0.10f, Ease upEase = Ease.OutBack, Ease downEase = Ease.InSine)
+    public void PlayClearPopAndReset(
+        float scaleUp = 1.2f, float upTime = 0.12f,
+        float downTime = 0.10f, Ease upEase = Ease.OutBack, Ease downEase = Ease.InSine)
     {
         _seq?.Kill();
         transform.localScale = Vector3.one;
@@ -301,57 +329,84 @@ public class GridSquareView : MonoBehaviour
         _seq?.Kill();
         _clearTween?.Kill();
         _glowTween?.Kill();
-        DOTween.Kill(this);
+        _introTween?.Kill();
     }
 
-    public void PlayIntroWave(
-        Sprite spriteForWave,
-        Color? tint,
-        float delay,
-        float fadeIn = 0.18f,
-        float hold = 0.06f,
-        float fadeOut = 0.25f,
-        float risePixels = 14f,
-        Ease easeIn = Ease.OutSine,
-        Ease easeOut = Ease.InSine
-    )
+    private void HideActiveForLinePreview()
     {
-        if (IsOccupied) return;
+        if (activeImage != null && activeImage.enabled)
+        {
+            activeImage.enabled = false;
+            _activeHiddenByLinePreview = true;
+        }
+        _linePreviewOn = true;
+    }
 
-        var img = introWaveImage != null ? introWaveImage
-                 : (hoverPreviewImage != null ? hoverPreviewImage : normalImage);
-        if (img == null) return;
+    private void RestoreActiveIfHiddenByLinePreview()
+    {
+        if (_linePreviewOn && _activeHiddenByLinePreview && IsOccupied && activeImage != null)
+            activeImage.enabled = true;
 
-        if (spriteForWave != null) img.sprite = spriteForWave;
+        _linePreviewOn = false;
+        _activeHiddenByLinePreview = false;
+    }
 
-        var baseColor = tint ?? Color.white;
-        baseColor.a = 0f;
+    // ================= Intro bằng SKIN SPRITE =================
 
-        img.enabled = true;
-        img.color = baseColor;
+    /// <summary>
+    /// Flash intro nhưng dùng sprite (thường lấy từ SkinProvider). Không chiếm ô.
+    /// </summary>
+    public void PlayIntroFlashWithSprite(Sprite skinSprite, float delay, float fadeIn = 0.10f, float fadeOut = 0.20f, float maxAlpha = 1f)
+    {
+        if (!introWaveImage) return;
 
-        var rt = img.rectTransform;
-        Vector2 basePos = rt.anchoredPosition;
+        _introTween?.Kill();
 
-        DOTween.Kill(img);
-        DOTween.Kill(rt);
+        introWaveImage.sprite = skinSprite != null ? skinSprite : defaultSprite;
+        introWaveImage.preserveAspect = true;
 
-        DOTween.Sequence()
-            .AppendInterval(delay)
-            .AppendCallback(() =>
-            {
-                rt.anchoredPosition = basePos - new Vector2(0f, risePixels);
-            })
-            .Append(img.DOFade(1f, fadeIn).SetEase(easeIn))
-            .Join(rt.DOAnchorPos(basePos, fadeIn).SetEase(easeIn))
-            .AppendInterval(hold)
-            .Append(img.DOFade(0f, fadeOut).SetEase(easeOut))
-            .OnComplete(() =>
-            {
-                img.enabled = false;
-                var c = img.color; c.a = 1f; img.color = c;
-                rt.anchoredPosition = basePos;
-            })
+        var c0 = introWaveImage.color; c0.a = 0f;
+        introWaveImage.color = c0;
+        introWaveImage.enabled = true;
+
+        float a = Mathf.Clamp01(maxAlpha);
+
+        _introTween = DOTween.Sequence()
+            .AppendInterval(Mathf.Max(0f, delay))
+            .Append(introWaveImage.DOFade(a, fadeIn))
+            .Append(introWaveImage.DOFade(0f, fadeOut))
+            .SetTarget(this);
+    }
+
+    /// <summary>
+    /// Flash intro cũ – giờ chuyển hướng sang dùng sprite (mặc định là defaultSprite).
+    /// </summary>
+    public void PlayIntroFlash(float delay, float fadeIn = 0.10f, float fadeOut = 0.20f, float maxAlpha = 0.8f)
+    {
+        PlayIntroFlashWithSprite(defaultSprite, delay, fadeIn, fadeOut, maxAlpha);
+    }
+
+    /// <summary>
+    /// "Đổ màu" – hiện sprite (skin) rồi fade đi. Không thay đổi Occupied.
+    /// </summary>
+    public void PlayIntroColorPour(Sprite skinSprite, float delay, float fadeIn = 0.14f, float hold = 0.05f, float fadeOut = 0.28f)
+    {
+        if (!introWaveImage) return;
+
+        _introTween?.Kill();
+
+        introWaveImage.sprite = skinSprite != null ? skinSprite : defaultSprite;
+        introWaveImage.preserveAspect = true;
+
+        var c0 = introWaveImage.color; c0.a = 0f;
+        introWaveImage.color = c0;
+        introWaveImage.enabled = true;
+
+        _introTween = DOTween.Sequence()
+            .AppendInterval(Mathf.Max(0f, delay))
+            .Append(introWaveImage.DOFade(1f, fadeIn))
+            .AppendInterval(Mathf.Max(0f, hold))
+            .Append(introWaveImage.DOFade(0f, fadeOut))
             .SetTarget(this);
     }
 }
