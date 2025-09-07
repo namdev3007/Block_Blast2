@@ -1,4 +1,5 @@
 🧱 Blockblast — Unity Puzzle
+![Uploading image.png…]()
 
 A tactile, combo-chasing block puzzler with juicy UI, smart piece spawning, and arcade-style scoring.
 ✨ Highlights
