@@ -2,8 +2,10 @@
 
 A tactile, combo-chasing block puzzler with juicy UI, smart piece spawning, and arcade-style scoring.
 
-<p align="center"> <img src="https://user-images.githubusercontent.com/placeholder/blockblast-hero.gif" alt="Blockblast gameplay" width="780"> </p> <p align="center"> <a href="https://unity.com/releases/editor"><img alt="Unity" src="https://img.shields.io/badge/Unity-2021.3%2B-black?logo=unity"></a> <img alt="Platform" src="https://img.shields.io/badge/Platforms-Android%20%7C%20iOS%20%7C%20PC-7957d5"> <img alt="License" src="https://img.shields.io/badge/License-MIT-2ea44f"> </p>
+<p align="center"> <img src="https://user-images.githubusercontent.com/placeholder/blockblast-hero.gif" alt="Blockblast gameplay" width="780"> </p> <p align="center"> <a href="https://unity.com/releases/editor"><img alt="Unity" src="https://img.shields.io/badge/Unity-6.3%2B-black?logo=unity"></a> <img alt="Platform" src="https://img.shields.io/badge/Platforms-Android%20%7C%20iOS%20%7C%20PC-7957d5">
 ✨ Highlights
+<img width="330" height="590" alt="image" src="https://github.com/user-attachments/assets/5356b93e-0f3b-4ded-be30-0fe9922d6ecc" />
+
 <img width="330" height="590" alt="image" src="https://github.com/user-attachments/assets/ea5d1a29-f4bd-435f-b7ac-c3f6c858f114" />
 
 Crisp grid UX with hover/line previews, place-flash, intro wave and clear-pop animations (DOTween).
@@ -107,7 +109,7 @@ UISwitcher: animated toggle (DOTween), persists state via prefsKey and fires onV
 🛠️ Getting Started
 Requirements
 
-Unity 2021.3 LTS or newer.
+Unity 6.
 
 Packages: TextMeshPro, DOTween (Pro or free), optionally Firebase Unity SDK.
 
