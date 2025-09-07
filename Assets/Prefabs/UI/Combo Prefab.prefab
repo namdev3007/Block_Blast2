@@ -133,8 +133,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 190.8882, y: -40.8022}
-  m_SizeDelta: {x: 581.7764, y: 131.6042}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: 703.5527, y: 131.6042}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &2353635773473866936
 CanvasRenderer:
@@ -198,7 +198,7 @@ MonoBehaviour:
   m_fontSizeMin: 18
   m_fontSizeMax: 72
   m_fontStyle: 3
-  m_HorizontalAlignment: 1
+  m_HorizontalAlignment: 2
   m_VerticalAlignment: 512
   m_textAlignment: 65535
   m_characterSpacing: 0
@@ -229,7 +229,7 @@ MonoBehaviour:
   m_VertexBufferAutoSizeReduction: 0
   m_useMaxVisibleDescender: 1
   m_pageToDisplay: 1
-  m_margin: {x: 0, y: 0, z: 101.98779, w: 0}
+  m_margin: {x: 0, y: 0, z: -0.14709473, w: 0}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
   m_hasFontAssetChanged: 0
@@ -248,7 +248,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   label: {fileID: 8596370410059321631}
-  numberFxPrefab: {fileID: 0}
+  numberFxPrefab: {fileID: 5494465260276743177}
   fxOffset: {x: 0, y: 0}
   risePixels: 60
   duration: 0.8

@@ -180,4 +180,31 @@ public class GridView : MonoBehaviour
         screen = RectTransformUtility.WorldToScreenPoint(uiCamera, world);
         return true;
     }
+    public bool TryGetNearestCellByScreenPoint(
+        Vector2 screenPoint, Camera uiCamera,
+        out GridSquareView cell, out int row, out int col)
+    {
+        cell = null; row = col = -1;
+
+        float bestSqr = float.PositiveInfinity;
+        for (int r = 0; r < rows; r++)
+        {
+            for (int c = 0; c < columns; c++)
+            {
+                if (TryGetSquareCenterScreen(r, c, uiCamera, out var centerScreen))
+                {
+                    float d2 = (centerScreen - screenPoint).sqrMagnitude;
+                    if (d2 < bestSqr)
+                    {
+                        bestSqr = d2;
+                        cell = _cells[r * columns + c];
+                        row = r; col = c;
+                    }
+                }
+            }
+        }
+        return cell != null;
+    }
+
+
 }

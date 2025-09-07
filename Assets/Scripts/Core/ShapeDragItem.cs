@@ -2,6 +2,7 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using System.Collections;
 
 [RequireComponent(typeof(CanvasGroup))]
 public class ShapeDragItem : MonoBehaviour,
@@ -31,8 +32,9 @@ public class ShapeDragItem : MonoBehaviour,
     public float pressLiftY = 24f;
 
     [Header("Combo Popup")]
-    public ComboPopupManager comboPopup;                 // gán trong Inspector
+    public PopupManager Popup;                 // gán trong Inspector
     public Vector2 comboOffset = new Vector2(0f, 36f);
+    public Vector2 pointsOffset = new Vector2(0f, -6f);
 
     // runtime
     private CanvasGroup _cg;
@@ -178,11 +180,11 @@ public class ShapeDragItem : MonoBehaviour,
 
         if (_draggingData == null) { board.ClearPreview(); return; }
 
-        // BÙ raycast bằng anchorFix (cùng TotalLocalOffset để không lệch)
         var screenPosWithOffset = eventData.position +
                                   LocalToScreenDelta(TotalLocalOffset + _anchorFixLocal);
 
-        if (!gridInput.TryGetCell(screenPosWithOffset, out var targetCell))
+        // ĐỔI từ gridInput.TryGetCell(...) sang:
+        if (!TryPickCellWithFallback(screenPosWithOffset, out var targetCell))
         {
             board.ClearPreview();
             return;
@@ -216,11 +218,10 @@ public class ShapeDragItem : MonoBehaviour,
             return;
         }
 
-        // Bù offset (grab + lift + anchorFix) cho raycast
         var screenPosWithOffset = eventData.position +
                                   LocalToScreenDelta(TotalLocalOffset + _anchorFixLocal);
 
-        if (!gridInput.TryGetCell(screenPosWithOffset, out var targetCell))
+        if (!TryPickCellWithFallback(screenPosWithOffset, out var targetCell))
         {
             CleanupAfterDrop();
             return;
@@ -236,7 +237,7 @@ public class ShapeDragItem : MonoBehaviour,
             return;
         }
 
-        // 1) Place vào state + paint
+        // 1) Place + paint
         board.State.Place(_draggingData, anchorRow, anchorCol);
         board.PaintPlacedVariant(_draggingData, anchorRow, anchorCol, _variantIndex);
 
@@ -252,26 +253,94 @@ public class ShapeDragItem : MonoBehaviour,
             sr = board.score.OnPiecePlaced(blockCells, linesCleared);
         }
 
-        // 3b) Combo popup (có lọc min combo trong manager)
-        if (linesCleared > 0 && comboPopup != null)
+        // 4) Popups (Combo -> Points & Praise đồng thời)
+        if (Popup != null && linesCleared > 0)
         {
-            int comboThisTurn = Mathf.Max(1, sr.comboBefore);
+            // Vị trí hiển thị (tâm cụm ô, fallback = chuột)
+            Vector2 pos;
+            if (!ComputePlacedCentroidScreen(_draggingData, anchorRow, anchorCol, _cam, out pos))
+                pos = eventData.position;
 
-            // offset mép trái: đẩy vào 150 px nếu chạm cột 0
-            Vector2 off = comboOffset;
+            // Offsets
+            Vector2 comboOff = comboOffset;
+            Vector2 pointsOff = pointsOffset;
+
             if (PlacementTouchesLeftEdge(_draggingData, anchorRow, anchorCol))
-                off.x = 200f;
+            {
+                float pushIn = 200f;
+                comboOff.x = pushIn;
+                pointsOff.x += pushIn;
+            }
 
-            if (ComputePlacedCentroidScreen(_draggingData, anchorRow, anchorCol, _cam, out var centerScreen))
-                comboPopup.ShowComboAtScreenPoint(comboThisTurn, centerScreen, _cam, off);
-            else
-                comboPopup.ShowComboAtScreenPoint(comboThisTurn, eventData.position, _cam, off);
+            int comboThisTurn = Mathf.Max(1, sr.comboBefore);
+            bool willShowCombo = comboThisTurn >= Popup.minComboToShow;
+
+            // Combo (nếu đủ ngưỡng)
+            if (willShowCombo)
+                Popup.ShowComboAtScreenPoint(comboThisTurn, pos, _cam, comboOff);
+
+            // Points & Praise: cùng lúc
+            if (sr.linePointsFinal > 0)
+            {
+                if (willShowCombo)
+                    StartCoroutine(ShowPointsAndPraiseLater(sr.linePointsFinal, linesCleared, pos, _cam, pointsOff, 0.8f));
+                else
+                {
+                    Popup.ShowPointsAtScreenPoint(sr.linePointsFinal, pos, _cam, pointsOff);
+                    if (linesCleared >= 2)
+                        Popup.ShowPraiseForLines(linesCleared, pos, _cam);
+                }
+            }
         }
 
-        // 4) Tiêu thụ slot & dọn
+        // 5) Tiêu thụ slot & dọn
         palette.Consume(slotIndex);
         CleanupAfterDrop();
     }
+
+    private IEnumerator ShowPointsAndPraiseLater(int points, int linesCleared, Vector2 pos, Camera cam, Vector2 offset, float delay)
+    {
+        float t = 0f;
+        while (t < delay)
+        {
+            t += Time.unscaledDeltaTime;
+            yield return null;
+        }
+
+        if (Popup != null)
+        {
+            Popup.ShowPointsAtScreenPoint(points, pos, cam, offset);
+            if (linesCleared >= 2)
+                Popup.ShowPraiseForLines(linesCleared, pos, cam);
+        }
+    }
+
+
+    private System.Collections.IEnumerator ShowPointsLater(int points, Vector2 pos, Camera cam, Vector2 offset, float delay)
+    {
+        float t = 0f;
+        while (t < delay)
+        {
+            t += Time.unscaledDeltaTime; // không phụ thuộc timeScale
+            yield return null;
+        }
+
+        if (Popup != null)
+            Popup.ShowPointsAtScreenPoint(points, pos, cam, offset);
+    }
+
+
+
+    private bool TryPickCellWithFallback(Vector2 screenPos, out GridSquareView targetCell)
+    {
+        // 1) Thử raycast UI như cũ
+        if (gridInput.TryGetCell(screenPos, out targetCell))
+            return true;
+
+        // 2) Fallback: snap về ô có tâm gần nhất
+        return gridView.TryGetNearestCellByScreenPoint(screenPos, _cam, out targetCell, out _, out _);
+    }
+
 
     private void CleanupAfterDrop()
     {
@@ -326,4 +395,6 @@ public class ShapeDragItem : MonoBehaviour,
         }
         return false;
     }
+
+
 }

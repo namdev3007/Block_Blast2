@@ -6,7 +6,7 @@ public struct ClassWeights
     [Range(0f, 5f)] public float small;   // 1–3 cells
     [Range(0f, 5f)] public float medium;  // 4–5 cells
     [Range(0f, 5f)] public float large;   // 6+ cells
-    [Range(0f, 5f)] public float line;    // 1xN or Nx1
+    [Range(0f, 5f)] public float line;    // 1xN hoặc Nx1
     [Range(0f, 5f)] public float square;  // full 2x2, 3x3
 
     public void Normalize()
@@ -32,40 +32,40 @@ public class ShapeSpawnConfig : ScriptableObject
 
     // ---------- Solvable Guard & Pity ----------
     [Header("Solvable Guard & Pity")]
+    [Tooltip("Yêu cầu tối thiểu X slot có thể đặt ngay trong hand.")]
     [Min(0)] public int requiredPlaceableSlots = 1;
+
+    [Tooltip("Bật rescue khi build hand thất bại nhiều lần.")]
     public bool enablePity = true;
+
+    [Tooltip("Số slot đầu tiên cố lấy khối nhỏ & có thể đặt.")]
     [Min(0)] public int pityRescueSlots = 1;
 
     // ---------- Bias: Line Chaser ----------
     [Header("Bias: Line Chaser")]
+    [Tooltip("Xác suất ép slot ưu tiên khối có khả năng clear line.")]
     [Range(0f, 1f)] public float forceLineClearChance = 0.2f;
 
-    // ---------- DDA Base Weights ----------
-    [Header("DDA Base Weights (before adjustments)")]
+    // ---------- DDA Base Weights (CỐ ĐỊNH) ----------
+    [Header("DDA Base Weights (cố định, không ramp)")]
     public ClassWeights baseWeights = new ClassWeights
     {
         small = 0.25f,
-        medium = 0.5f,
-        large = 0.2f,
-        line = 0.1f,
-        square = 0.0f
+        medium = 0.50f,
+        large = 0.20f,
+        line = 0.10f,
+        square = 0.00f
     };
 
-    // ---------- DDA Tight Board ----------
-    [Header("DDA: Tight Board Adjustments")]
+    // ---------- DDA: Tight Board ----------
+    [Header("DDA: Điều chỉnh khi bàn CHẬT")]
     [Range(0f, 1f)] public float tightBoardFreeThreshold = 0.35f;
     [Range(0.5f, 2f)] public float tightSmallBoost = 1.15f;
     [Range(0.5f, 2f)] public float tightLineBoost = 1.10f;
     [Range(0.3f, 1.2f)] public float tightLargePenalty = 0.85f;
 
-    // ---------- DDA Ramp ----------
-    [Header("DDA: Ramp over playtime (refill count)")]
-    [Min(1)] public int rampRefillsToMax = 30;
-    [Range(0.3f, 1f)] public float rampSmallPenalty = 0.7f;
-    [Range(1f, 2f)] public float rampLargeBoost = 1.3f;
-
-    // ---------- Scoring ----------
-    [Header("Scoring (shape candidate scoring)")]
+    // ---------- Scoring weights ----------
+    [Header("Scoring (điểm đánh giá ứng viên)")]
     public float wPlaceable = 2f;
     public float wPlacementCount = 0.5f;
     public int minPlacementsTarget = 2;
@@ -73,52 +73,53 @@ public class ShapeSpawnConfig : ScriptableObject
     public float wLineClear = 3f;
     public float wArea = 0.05f;
 
-    // ---------- Optional Curves ----------
-    [Header("Optional: Ramp Curves (alternative to linear ramp)")]
-    public AnimationCurve smallMulCurve = AnimationCurve.Linear(0, 1, 1, 0.7f);
-    public AnimationCurve largeMulCurve = AnimationCurve.Linear(0, 1, 1, 1.3f);
+    [Tooltip("Ưu tiên giữ chuỗi: số hàng/cột còn thiếu 1 ô sau khi giả lập đặt.")]
+    public float wChainPotential = 1.0f;
 
-    // ---------- NEW: Triplet Bag ----------
+    // ---------- Triplet Bag ----------
     [Header("Triplet Bag")]
-    [Tooltip("Use Triplet Bag (build ~N candidate bags, pick one randomly).")]
     public bool useTripletBag = true;
-
-    [Tooltip("How many valid candidate bags to generate each refill (e.g. 50).")]
     [Min(1)] public int bagCandidateCount = 50;
-
-    [Tooltip("Cap how many attempts when searching bag candidates (safety).")]
     [Min(10)] public int bagMaxBuildTrials = 400;
-
-    [Tooltip("Avoid having duplicated shapes inside the same bag.")]
     public bool bagAvoidDuplicateShapes = true;
-
-    [Tooltip("Require that the 3 shapes can be placed sequentially on a snapshot grid.")]
     public bool bagRequireSequentialPlaceability = true;
-
-    [Tooltip("Additionally require that at least one of the 3 causes a line clear (optional).")]
     public bool bagRequireAtLeastOneLineClear = false;
 
-    // ---------- NEW: Hole Filler ----------
+    // ---------- Hole Filler ----------
     [Header("Hole Filler")]
-    [Tooltip("Occasionally spawn a piece that perfectly fits a small empty cavity.")]
     public bool enableHoleFiller = true;
-
-    [Tooltip("Chance per refill to inject ONE hole-filler into hand/bag.")]
     [Range(0f, 1f)] public float holeFillerChance = 0.25f;
-
-    [Tooltip("Max cavity size (cells) to consider as a hole.")]
     [Min(1)] public int holeFillerMaxCells = 6;
-
-    [Tooltip("How many random shapes to sample when searching hole-fits.")]
     [Min(1)] public int holeFitterSampleShapes = 220;
-
-    [Tooltip("When using Bag mode, allow hole-filler to be injected into a bag.")]
     public bool holeFillerAffectsBag = true;
 
+    // ---------- High-Line Favor (≥5 / ≥6 lines) ----------
+    [Header("Ưu tiên 'ăn nhiều hàng' (không bắt buộc)")]
+    [Tooltip("Xác suất ưu tiên tạo ra hand/bag có ÍT NHẤT MỘT khối có thể ăn >= 6 lines (nếu đặt đúng).")]
+    [Range(0f, 1f)] public float highLine6Chance = 0.03f;
+    [Tooltip("Xác suất ưu tiên tạo ra hand/bag có ÍT NHẤT MỘT khối có thể ăn >= 5 lines.")]
+    [Range(0f, 1f)] public float highLine5Chance = 0.07f;
+
+    // ---------- Sudden-Death ----------
+    [Header("Sudden-Death (sai 1 nước thua)")]
+    public bool suddenDeathEnabled = true;
+    [Min(0)] public int suddenMinMoves = 10;
+    [Min(0)] public int suddenMaxExtraMoves = 10;
+    [Range(0f, 1f)] public float suddenTriggerChance = 0.5f;
+    public bool suddenRequireLineClearEachStep = false;
+    [Min(0)] public int suddenCooldownRefills = 2;
+
+    // ---------- Validator ----------
     private void OnValidate()
     {
-        minPlacementsTarget = Mathf.Max(0, minPlacementsTarget);
-        maxPlacementsTarget = Mathf.Max(minPlacementsTarget, maxPlacementsTarget);
+        maxHandBuildAttempts = Mathf.Max(1, maxHandBuildAttempts);
+        samplesPerSlot = Mathf.Max(1, samplesPerSlot);
+        topK = Mathf.Max(1, topK);
+        requiredPlaceableSlots = Mathf.Max(0, requiredPlaceableSlots);
+        pityRescueSlots = Mathf.Max(0, pityRescueSlots);
         bagCandidateCount = Mathf.Max(1, bagCandidateCount);
+        bagMaxBuildTrials = Mathf.Max(10, bagMaxBuildTrials);
+        holeFillerMaxCells = Mathf.Max(1, holeFillerMaxCells);
+        holeFitterSampleShapes = Mathf.Max(1, holeFitterSampleShapes);
     }
 }

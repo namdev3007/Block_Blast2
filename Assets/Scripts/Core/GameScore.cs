@@ -7,32 +7,31 @@ public struct ScoreResult
     public int moveIndex;
     public int blockCells;
     public int linesCleared;
-    public int comboBefore;     // combo dùng để nhân điểm ở lượt này
-    public int comboAfter;      // combo sau khi cập nhật
+    public int comboBefore;     // cấp combo dùng để nhân điểm ở lượt này (không phải hệ số)
+    public int comboAfter;      // cấp combo sau khi cập nhật
     public int linePointsBase;
     public int linePointsFinal;
     public int blockPoints;
     public int totalGain;
-    public bool rescuedCombo;   // có rescue khi đang armed hay không
-    public bool wasArmed;       // trước lượt này có đang armed (đủ 3 miss) hay không
+    public bool rescuedCombo;
+    public bool wasArmed;
 }
 
 public class GameScore : MonoBehaviour
 {
-    // NEW: thông báo mỗi lần điểm thay đổi
     public event Action<ScoreResult> Scored;
 
     [Header("Combo")]
     [Tooltip("Combo có thể tăng vô hạn.")]
     public bool unlimitedCombo = true;
 
-    [Tooltip("Nhân điểm ô theo combo hay không (mặc định KHÔNG theo spec).")]
+    [Tooltip("Nhân điểm ô theo combo hay không.")]
     public bool applyComboToBlockCells = false;
 
     [Header("Runtime (read-only)")]
     [SerializeField] private int totalScore;
     [SerializeField] private int moveCount;
-    [SerializeField] private int comboLevel = 1; // 1..∞
+    [SerializeField] private int comboLevel = 1; // 1..∞ (cấp combo)
     [SerializeField] private int dryStreak = 0;
 
     public int TotalScore => totalScore;
@@ -46,7 +45,6 @@ public class GameScore : MonoBehaviour
         moveCount = 0;
         comboLevel = 1;
         dryStreak = 0;
-        // Optionally phát một event điểm 0
         Scored?.Invoke(new ScoreResult
         {
             moveIndex = moveCount,
@@ -60,20 +58,25 @@ public class GameScore : MonoBehaviour
         moveCount++;
 
         int prevDry = dryStreak;
-        bool armed = prevDry >= 3;
+        bool armed = prevDry >= 3;   // đang trong trạng thái “cảnh báo” combo
         bool rescued = false;
 
         int comboUsed = comboLevel;
+
         if (armed)
         {
-            if (linesCleared > 0) { rescued = true; comboUsed = comboLevel; }
+            if (linesCleared > 0) { rescued = true; /* giữ comboUsed như cũ */ }
             else { comboLevel = 1; comboUsed = comboLevel; }
         }
 
-        int comboMult = Mathf.Max(1, comboUsed);
+        float comboMult = ComboMultiplier(comboUsed);
+
         int lineBase = GetLineClearBase(linesCleared);
-        int lineFinal = lineBase * comboMult;
-        int blockFinal = (applyComboToBlockCells && linesCleared > 0) ? blockCells * comboMult : blockCells;
+        int lineFinal = Mathf.RoundToInt(lineBase * comboMult);
+
+        int blockFinal = blockCells;
+        if (applyComboToBlockCells && linesCleared > 0)
+            blockFinal = Mathf.RoundToInt(blockCells * comboMult);
 
         int gain = blockFinal + lineFinal;
         totalScore += gain;
@@ -86,8 +89,8 @@ public class GameScore : MonoBehaviour
             moveIndex = moveCount,
             blockCells = blockCells,
             linesCleared = linesCleared,
-            comboBefore = comboUsed,
-            comboAfter = comboLevel,
+            comboBefore = comboUsed,   // vẫn trả cấp combo
+            comboAfter = comboLevel,   // cấp mới sau lượt này
             linePointsBase = lineBase,
             linePointsFinal = lineFinal,
             blockPoints = blockFinal,
@@ -96,9 +99,16 @@ public class GameScore : MonoBehaviour
             wasArmed = armed
         };
 
-        // NEW: bắn event
         Scored?.Invoke(result);
         return result;
+    }
+
+    private float ComboMultiplier(int c)
+    {
+        if (c <= 1) return 1f;
+        if (c <= 4) return c + 1f;                  // 2→3×, 3→4×, 4→5×
+        if (c <= 9) return 9f + 1.5f * (c - 5);     // 5→9×, 6→10.5×, ..., 9→15×
+        return 22f + 2f * (c - 10);                 // 10→22×, 11→24×, ...
     }
 
     private int GetLineClearBase(int lines)

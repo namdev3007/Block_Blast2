@@ -13,11 +13,15 @@ public class ShapePalette : MonoBehaviour
     public SkinProvider skinProvider;
 
     [Header("Spawn Config")]
-    public ShapeSpawnConfig config; // assign via Inspector (không New() trực tiếp)
+    public ShapeSpawnConfig config; // assign via Inspector
 
     [Header("Anti-repeat")]
     public int historyKeep = 6;
 
+    // === Sudden-Death hooks (tuỳ chọn) ===
+    public GameScore score; // nếu muốn tính theo MoveCount thực
+
+    // runtime
     private readonly List<ShapeData> _current = new();
     private readonly Queue<ShapeData> _history = new();
     private readonly List<int> _slotVariants = new();
@@ -25,11 +29,25 @@ public class ShapePalette : MonoBehaviour
     private System.Random _rng;
     private int _refillCount;
 
+    // --- Sudden-Death runtime ---
+    public event System.Action SuddenGameOver;
+
+    private class SuddenState
+    {
+        public bool active;
+        public HashSet<ShapeData> remaining = new HashSet<ShapeData>();
+        public bool requireClearEachStep;
+    }
+    private SuddenState _sudden = null;
+    private int _refillsSinceSudden = 999;
+    private int _nextSuddenAtMove = -1;
+
+    public bool IsSuddenActive => _sudden != null && _sudden.active;
+
     private void Awake()
     {
         _rng = new System.Random();
 
-        // An toàn nếu quên gán asset trong Inspector
         if (config == null)
         {
             Debug.LogWarning($"{name}: ShapeSpawnConfig is null. Creating a runtime instance (won't be saved).");
@@ -39,38 +57,75 @@ public class ShapePalette : MonoBehaviour
 
     private void Start() => Refill();
 
+    // ========================= PUBLIC API =========================
     public void Refill()
     {
         if (library == null || slots == null || slots.Count == 0) return;
 
-        List<ShapeData> hand;
+        // 1) High-line priority (6 → 5) → 2) Sudden Death → 3) Normal bag/hand
+        List<ShapeData> hand = null;
 
-        if (config.useTripletBag && slots.Count >= 3 && board != null && board.State != null)
+        float r = UnityEngine.Random.value;
+        if (r < config.highLine6Chance)
         {
-            // NEW: dùng Triplet Bag
-            hand = BuildTripletBagForCurrentBoard(slots.Count);
+            hand = TryBuildHighLineHandOrBag(slots.Count, minLines: 6);
         }
-        else
+        else if (r < config.highLine6Chance + config.highLine5Chance)
         {
-            // Hand thông minh như cũ
-            hand = BuildHandSmart(slots.Count);
+            hand = TryBuildHighLineHandOrBag(slots.Count, minLines: 5);
+        }
 
-            // NEW: inject 1 hole-filler ngẫu nhiên nếu không dùng bag
-            if (!config.useTripletBag && config.enableHoleFiller && (_rng.NextDouble() < config.holeFillerChance)
-                && board != null && board.State != null)
+        if (hand == null)
+        {
+            // Sudden-Death?
+            bool shouldSudden = ShouldTriggerSuddenDeath();
+
+            if (shouldSudden && slots.Count >= 3 && board != null && board.State != null)
             {
-                var holeFits = CollectHoleFillerShapes(board.State, config.holeFillerMaxCells, config.holeFitterSampleShapes);
-                if (holeFits.Count > 0)
+                hand = BuildSuddenDeathBag(slots.Count, out var triplet);
+                if (hand != null && triplet != null)
                 {
-                    int slotPick = _rng.Next(Mathf.Min(slots.Count, hand.Count));
-                    hand[slotPick] = holeFits[_rng.Next(holeFits.Count)];
+                    _sudden = new SuddenState
+                    {
+                        active = true,
+                        requireClearEachStep = config.suddenRequireLineClearEachStep
+                    };
+                    foreach (var s in triplet) _sudden.remaining.Add(s);
+
+                    _refillsSinceSudden = 0;
+                    ScheduleNextSudden();
                 }
             }
         }
 
-        _current.Clear(); _current.AddRange(hand);
+        if (hand == null)
+        {
+            if (config.useTripletBag && slots.Count >= 3 && board != null && board.State != null)
+            {
+                hand = BuildTripletBagForCurrentBoard(slots.Count);
+            }
+            else
+            {
+                hand = BuildHandSmart(slots.Count);
 
+                if (!config.useTripletBag && config.enableHoleFiller &&
+                    (UnityEngine.Random.value < config.holeFillerChance) &&
+                    board != null && board.State != null)
+                {
+                    var holeFits = CollectHoleFillerShapes(board.State, config.holeFillerMaxCells, config.holeFitterSampleShapes);
+                    if (holeFits.Count > 0)
+                    {
+                        int slotPick = _rng.Next(Mathf.Min(slots.Count, hand.Count));
+                        hand[slotPick] = holeFits[_rng.Next(holeFits.Count)];
+                    }
+                }
+            }
+        }
+
+        // Render hand
+        _current.Clear(); _current.AddRange(hand);
         _slotVariants.Clear();
+
         for (int i = 0; i < slots.Count; i++)
         {
             int variant = (skinProvider != null) ? skinProvider.RollVariant() : 0;
@@ -87,7 +142,9 @@ public class ShapePalette : MonoBehaviour
         }
 
         _refillCount++;
+        _refillsSinceSudden++;
     }
+
 
     public void OnAllUsed() => Refill();
 
@@ -111,6 +168,9 @@ public class ShapePalette : MonoBehaviour
         _history.Enqueue(_current[slotIndex]);
         while (_history.Count > historyKeep) _history.Dequeue();
 
+        // Sudden: bỏ khối vừa dùng khỏi remaining
+        if (IsSuddenActive) _sudden.remaining.Remove(_current[slotIndex]);
+
         _current[slotIndex] = null;
         if (slotIndex < _slotVariants.Count) _slotVariants[slotIndex] = 0;
 
@@ -119,6 +179,32 @@ public class ShapePalette : MonoBehaviour
         if (AllConsumed()) Refill();
     }
 
+    public bool ValidateSuddenStateAfterPlacement(BoardState currentBoard)
+    {
+        if (!IsSuddenActive) return true;
+
+        if (_sudden.remaining.Count == 0)
+        {
+            _sudden.active = false; // Hoàn tất thử thách
+            return true;
+        }
+
+        var snap = new BoardSnapshot(currentBoard);
+        var rest = new List<ShapeData>(_sudden.remaining).ToArray();
+        bool ok = _sudden.requireClearEachStep
+                  ? ExistsSequentialPlacementEachStepClears(snap, rest)
+                  : ExistsSequentialPlacement(snap, rest, requireAnyLineClear: false);
+        return ok;
+    }
+
+    public void ForceSuddenGameOver(string reason = "Wrong move in Sudden-Death!")
+    {
+        Debug.LogWarning($"GAME OVER: {reason}");
+        SuddenGameOver?.Invoke();
+        Time.timeScale = 0f;
+    }
+
+    // ========================= Core helpers =========================
     private bool AllConsumed()
     {
         for (int i = 0; i < _current.Count; i++)
@@ -126,7 +212,87 @@ public class ShapePalette : MonoBehaviour
         return true;
     }
 
-    // ========================= NEW: Triplet Bag Builder =========================
+    // ---------- DDA (no ramp) ----------
+    private ClassWeights ComputeWeightsWithDDA()
+    {
+        var W = config.baseWeights;
+        W.Normalize();
+
+        bool tight = false;
+        if (board != null && board.State != null)
+        {
+            int H = board.State.Height, WW = board.State.Width;
+            int occ = 0;
+            for (int r = 0; r < H; r++)
+                for (int c = 0; c < WW; c++)
+                    if (board.State.IsOccupied(r, c)) occ++;
+
+            float freeRatio = 1f - (float)occ / (WW * H);
+            tight = freeRatio < config.tightBoardFreeThreshold;
+        }
+
+        if (tight)
+        {
+            W.small *= config.tightSmallBoost;
+            W.line *= config.tightLineBoost;
+            W.large *= config.tightLargePenalty;
+        }
+
+        W.Normalize();
+        return W;
+    }
+
+    // ---------- Hand builder ----------
+    private List<ShapeData> BuildHandSmart(int count)
+    {
+        var state = board != null ? board.State : null;
+
+        for (int attempt = 0; attempt < config.maxHandBuildAttempts; attempt++)
+        {
+            var weights = ComputeWeightsWithDDA();
+            var hand = new List<ShapeData>(count);
+            int placeableSlots = 0;
+
+            for (int i = 0; i < count; i++)
+            {
+                bool forceLine = _rng.NextDouble() < config.forceLineClearChance;
+                bool mustBePlaceable = (placeableSlots < config.requiredPlaceableSlots);
+
+                var pick = PickOneShapeSmart(state, hand, weights, forceLine, mustBePlaceable);
+                hand.Add(pick);
+
+                if (state == null || CountPlacements(pick, state) > 0) placeableSlots++;
+            }
+
+            if (placeableSlots >= Mathf.Max(0, config.requiredPlaceableSlots))
+                return hand;
+        }
+
+        if (!config.enablePity) return BuildFallbackRandom(count);
+        return BuildPityHand(count, board != null ? board.State : null);
+    }
+
+    private List<ShapeData> BuildFallbackRandom(int count)
+    {
+        var hand = new List<ShapeData>(count);
+        for (int i = 0; i < count; i++) hand.Add(library.GetRandom());
+        return hand;
+    }
+
+    private List<ShapeData> BuildPityHand(int count, BoardState state)
+    {
+        var hand = new List<ShapeData>(count);
+        int guaranteed = Mathf.Min(config.pityRescueSlots, count);
+        for (int i = 0; i < guaranteed; i++) hand.Add(PickSmallAndPlaceable(state));
+
+        var weights = ComputeWeightsWithDDA();
+        for (int i = guaranteed; i < count; i++)
+            hand.Add(PickOneShapeSmart(state, hand, weights, false, false));
+
+        return hand;
+    }
+
+    // ---------- Triplet Bag ----------
     private List<ShapeData> BuildTripletBagForCurrentBoard(int needed)
     {
         var state = board.State;
@@ -134,22 +300,20 @@ public class ShapePalette : MonoBehaviour
         var candidates = new List<(ShapeData a, ShapeData b, ShapeData c)>();
         int trials = 0;
 
-        // Chuẩn bị danh sách hole-filler nếu bật & trúng xác suất
+        // Optional: hole-filler injection
         List<ShapeData> holeFits = null;
         bool tryHoleFiller = config.enableHoleFiller && config.holeFillerAffectsBag &&
-                             (_rng.NextDouble() < config.holeFillerChance);
+                             (UnityEngine.Random.value < config.holeFillerChance);
         if (tryHoleFiller)
         {
             holeFits = CollectHoleFillerShapes(state, config.holeFillerMaxCells, config.holeFitterSampleShapes);
             if (holeFits != null && holeFits.Count == 0) holeFits = null;
         }
 
-        // Sinh đến khi đủ ~bagCandidateCount hoặc hết trials
         while (candidates.Count < config.bagCandidateCount && trials < config.bagMaxBuildTrials)
         {
             trials++;
 
-            // pick 3 shapes; ưu tiên chèn hole-filler nếu có
             ShapeData s1, s2, s3;
             if (holeFits != null && holeFits.Count > 0 && _rng.Next(3) == 0)
             {
@@ -180,18 +344,13 @@ public class ShapePalette : MonoBehaviour
                (ReferenceEquals(s1, s2) || ReferenceEquals(s1, s3) || ReferenceEquals(s2, s3)))
                 continue;
 
-            // Validate bag
-            if (ValidateBagOnSnapshot(state, s1, s2, s3))
-                candidates.Add((s1, s2, s3));
+            if (!ValidateBagOnSnapshot(state, s1, s2, s3)) continue;
+
+            candidates.Add((s1, s2, s3));
         }
 
-        if (candidates.Count == 0)
-        {
-            // fallback: dùng hand thông minh cũ
-            return BuildHandSmart(needed);
-        }
+        if (candidates.Count == 0) return BuildHandSmart(needed);
 
-        // pick ngẫu nhiên 1 bag
         var pick = candidates[_rng.Next(candidates.Count)];
         var hand = new List<ShapeData>(needed);
         hand.Add(pick.a);
@@ -216,18 +375,197 @@ public class ShapePalette : MonoBehaviour
 
         if (config.bagRequireAtLeastOneLineClear)
         {
-            // kiểm tra liệu có ít nhất một shape tạo line clear trong bất kỳ bước của chuỗi khả dụng
             if (!ExistsSequentialPlacement(snap, arr, requireAnyLineClear: true))
                 return false;
         }
-
         return true;
     }
 
-    // DFS nông tìm chuỗi đặt 3 shape theo một hoán vị và anchor bất kỳ
+    // ---------- High-Line builder (≥ N lines) ----------
+    private List<ShapeData> TryBuildHighLineHandOrBag(int needed, int minLines)
+    {
+        if (board == null || board.State == null) return null;
+
+        // Ưu tiên bag nếu đang bật bag
+        if (config.useTripletBag && needed >= 3)
+        {
+            var bag = BuildTripletBagForCurrentBoard(needed);
+            if (BagHasAnyMinLines(bag, minLines, board.State)) return bag;
+        }
+
+        // Thử hand thường nhiều lần với ràng buộc ≥ minLines
+        for (int attempt = 0; attempt < config.maxHandBuildAttempts; attempt++)
+        {
+            var hand = BuildHandSmart(needed);
+            if (BagHasAnyMinLines(hand, minLines, board.State)) return hand;
+        }
+        return null;
+    }
+
+    private bool BagHasAnyMinLines(List<ShapeData> hand, int minLines, BoardState state)
+    {
+        if (hand == null || state == null) return false;
+        var snap = new BoardSnapshot(state);
+        foreach (var s in hand)
+            if (ExistsPlacementWithMinLines(snap, s, minLines)) return true;
+        return false;
+    }
+
+    private bool ExistsPlacementWithMinLines(BoardSnapshot snap, ShapeData s, int minLines)
+    {
+        foreach (var pos in snap.AllAnchorsFor(s))
+        {
+            int clears = snap.CountLinesCompletedIfPlaced(s, pos.r, pos.c);
+            if (clears >= minLines) return true;
+        }
+        return false;
+    }
+
+    // ---------- Snapshot simulator ----------
+    private sealed class BoardSnapshot
+    {
+        public readonly int W, H;
+        private readonly bool[] occ;
+
+        public BoardSnapshot(BoardState st)
+        {
+            W = st.Width; H = st.Height;
+            occ = new bool[W * H];
+            for (int r = 0; r < H; r++)
+                for (int c = 0; c < W; c++)
+                    occ[r * W + c] = st.IsOccupied(r, c);
+        }
+
+        private BoardSnapshot(int W, int H, bool[] occ)
+        {
+            this.W = W; this.H = H; this.occ = occ;
+        }
+
+        public BoardSnapshot Clone()
+        {
+            var copy = new bool[occ.Length];
+            Array.Copy(occ, copy, occ.Length);
+            return new BoardSnapshot(W, H, copy);
+        }
+
+        public bool IsInside(int r, int c) => (r >= 0 && r < H && c >= 0 && c < W);
+
+        public bool CanPlace(ShapeData s, int anchorR, int anchorC)
+        {
+            var b = s.GetBounds();
+            if (b.maxR < b.minR) return false;
+
+            foreach (var cell in s.GetFilledCells())
+            {
+                int r = anchorR + cell.x;
+                int c = anchorC + cell.y;
+                if (!IsInside(r, c)) return false;
+                if (occ[r * W + c]) return false;
+            }
+            return true;
+        }
+
+        public void Place(ShapeData s, int anchorR, int anchorC)
+        {
+            foreach (var cell in s.GetFilledCells())
+            {
+                int r = anchorR + cell.x;
+                int c = anchorC + cell.y;
+                occ[r * W + c] = true;
+            }
+        }
+
+        public IEnumerable<(int r, int c)> AllAnchorsFor(ShapeData s)
+        {
+            var b = s.GetBounds();
+            if (b.maxR < b.minR) yield break;
+
+            int sh = b.maxR - b.minR + 1;
+            int sw = b.maxC - b.minC + 1;
+
+            for (int r = -b.minR; r <= H - sh; r++)
+                for (int c = -b.minC; c <= W - sw; c++)
+                    if (CanPlace(s, r, c)) yield return (r, c);
+        }
+
+        public int CountLinesCompletedIfPlaced(ShapeData s, int anchorR, int anchorC)
+        {
+            var tmp = new bool[occ.Length];
+            Array.Copy(occ, tmp, occ.Length);
+
+            foreach (var cell in s.GetFilledCells())
+            {
+                int r = anchorR + cell.x;
+                int c = anchorC + cell.y;
+                if (IsInside(r, c)) tmp[r * W + c] = true;
+            }
+
+            int clears = 0;
+            // rows
+            for (int r = 0; r < H; r++)
+            {
+                bool full = true;
+                for (int c = 0; c < W; c++)
+                    if (!tmp[r * W + c]) { full = false; break; }
+                if (full) clears++;
+            }
+            // cols
+            for (int c = 0; c < W; c++)
+            {
+                bool full = true;
+                for (int r = 0; r < H; r++)
+                    if (!tmp[r * W + c]) { full = false; break; }
+                if (full) clears++;
+            }
+            return clears;
+        }
+
+        public int CountNearFullLinesIfPlaced(ShapeData s, int anchorR, int anchorC, int missing = 1)
+        {
+            var tmp = new int[W * H];
+            // build counts: we only need per-row/per-col, but quick heuristic:
+
+            // copy occ to bool
+            var bocc = new bool[W * H];
+            for (int i = 0; i < bocc.Length; i++) bocc[i] = (tmp[i] != 0); // will set below
+
+            // easier: recompute directly
+            var occ2 = new bool[W * H];
+            for (int r = 0; r < H; r++)
+                for (int c = 0; c < W; c++)
+                    occ2[r * W + c] = occ[r * W + c];
+
+            foreach (var cell in s.GetFilledCells())
+            {
+                int r = anchorR + cell.x;
+                int c = anchorC + cell.y;
+                if (IsInside(r, c)) occ2[r * W + c] = true;
+            }
+
+            int near = 0;
+            // rows
+            for (int r = 0; r < H; r++)
+            {
+                int cnt = 0;
+                for (int c = 0; c < W; c++)
+                    if (occ2[r * W + c]) cnt++;
+                if (W - cnt == missing) near++;
+            }
+            // cols
+            for (int c = 0; c < W; c++)
+            {
+                int cnt = 0;
+                for (int r = 0; r < H; r++)
+                    if (occ2[r * W + c]) cnt++;
+                if (H - cnt == missing) near++;
+            }
+            return near;
+        }
+    }
+
+    // ---------- Search chains ----------
     private bool ExistsSequentialPlacement(BoardSnapshot start, ShapeData[] shapes, bool requireAnyLineClear = false)
     {
-        // thử mọi hoán vị 3! = 6
         int[][] perms = {
             new[] {0,1,2}, new[] {0,2,1},
             new[] {1,0,2}, new[] {1,2,0},
@@ -235,10 +573,8 @@ public class ShapePalette : MonoBehaviour
         };
 
         foreach (var p in perms)
-        {
             if (SearchChain(start, shapes, p, 0, requireAnyLineClear, anyClearSeen: false))
                 return true;
-        }
         return false;
     }
 
@@ -259,7 +595,97 @@ public class ShapePalette : MonoBehaviour
         return false;
     }
 
-    // ========================= NEW: Hole Filler Helpers =========================
+    private bool ExistsSequentialPlacementEachStepClears(BoardSnapshot start, ShapeData[] shapes)
+    {
+        int[][] perms = {
+            new[]{0,1,2}, new[]{0,2,1},
+            new[]{1,0,2}, new[]{1,2,0},
+            new[]{2,0,1}, new[]{2,1,0}
+        };
+        foreach (var p in perms)
+            if (SearchChainRequireClearEach(start, shapes, p, 0)) return true;
+        return false;
+    }
+
+    private bool SearchChainRequireClearEach(BoardSnapshot snap, ShapeData[] shapes, int[] order, int depth)
+    {
+        if (depth == order.Length) return true;
+
+        var s = shapes[order[depth]];
+        foreach (var pos in snap.AllAnchorsFor(s))
+        {
+            int clears = snap.CountLinesCompletedIfPlaced(s, pos.r, pos.c);
+            if (clears <= 0) continue;
+
+            var next = snap.Clone();
+            next.Place(s, pos.r, pos.c);
+            if (SearchChainRequireClearEach(next, shapes, order, depth + 1)) return true;
+        }
+        return false;
+    }
+
+    // ---------- Sudden-Death scheduling ----------
+    private bool ShouldTriggerSuddenDeath()
+    {
+        if (!config.suddenDeathEnabled) return false;
+        if (board == null || board.State == null) return false;
+        if (slots == null || slots.Count < 3) return false;
+        if (_refillsSinceSudden < config.suddenCooldownRefills) return false;
+
+        int moves = (score != null) ? score.MoveCount : _refillCount * 3;
+        if (_nextSuddenAtMove < 0) ScheduleNextSudden();
+        if (moves < _nextSuddenAtMove) return false;
+
+        return UnityEngine.Random.value < config.suddenTriggerChance;
+    }
+
+    private void ScheduleNextSudden()
+    {
+        int moves = (score != null) ? score.MoveCount : _refillCount * 3;
+        int extra = (config.suddenMaxExtraMoves <= 0) ? 0 : UnityEngine.Random.Range(0, config.suddenMaxExtraMoves + 1);
+        _nextSuddenAtMove = moves + Mathf.Max(0, config.suddenMinMoves) + extra;
+    }
+
+    private List<ShapeData> BuildSuddenDeathBag(int needed, out ShapeData[] tripletOut)
+    {
+        tripletOut = null;
+        var state = board.State;
+        var weights = ComputeWeightsWithDDA();
+        int trials = 0;
+
+        while (trials++ < Mathf.Max(200, config.bagMaxBuildTrials / 2))
+        {
+            var s1 = PickOneShapeSmart(state, new List<ShapeData>(), weights, false, true);
+            var s2 = PickOneShapeSmart(state, new List<ShapeData> { s1 }, weights, false, true);
+            var s3 = PickOneShapeSmart(state, new List<ShapeData> { s1, s2 }, weights, false, true);
+
+            if (config.bagAvoidDuplicateShapes &&
+               (ReferenceEquals(s1, s2) || ReferenceEquals(s1, s3) || ReferenceEquals(s2, s3)))
+                continue;
+
+            var snap = new BoardSnapshot(state);
+            var arr = new[] { s1, s2, s3 };
+
+            bool seqOK = ExistsSequentialPlacement(snap, arr, requireAnyLineClear: false);
+            if (!seqOK) continue;
+
+            if (config.suddenRequireLineClearEachStep &&
+                !ExistsSequentialPlacementEachStepClears(snap, arr))
+                continue;
+
+            var hand = new List<ShapeData>(needed);
+            hand.Add(s1);
+            if (needed > 1) hand.Add(s2);
+            if (needed > 2) hand.Add(s3);
+            while (hand.Count < needed) hand.Add(library.GetRandom());
+
+            tripletOut = arr;
+            return hand;
+        }
+        return null;
+    }
+
+    // ---------- Hole Filler ----------
     private struct EmptyRegion
     {
         public int top, left, height, width, count;
@@ -380,196 +806,7 @@ public class ShapePalette : MonoBehaviour
         return res;
     }
 
-    // ========================= Snapshot simulator =========================
-    private sealed class BoardSnapshot
-    {
-        public readonly int W, H;
-        private readonly bool[] occ; // r*W + c
-
-        public BoardSnapshot(BoardState st)
-        {
-            W = st.Width; H = st.Height;
-            occ = new bool[W * H];
-            for (int r = 0; r < H; r++)
-                for (int c = 0; c < W; c++)
-                    occ[r * W + c] = st.IsOccupied(r, c);
-        }
-
-        private BoardSnapshot(int W, int H, bool[] occ)
-        {
-            this.W = W; this.H = H; this.occ = occ;
-        }
-
-        public BoardSnapshot Clone()
-        {
-            var copy = new bool[occ.Length];
-            Array.Copy(occ, copy, occ.Length);
-            return new BoardSnapshot(W, H, copy);
-        }
-
-        public bool IsInside(int r, int c) => (r >= 0 && r < H && c >= 0 && c < W);
-
-        public bool CanPlace(ShapeData s, int anchorR, int anchorC)
-        {
-            var b = s.GetBounds();
-            if (b.maxR < b.minR) return false;
-
-            foreach (var cell in s.GetFilledCells())
-            {
-                int r = anchorR + cell.x;
-                int c = anchorC + cell.y;
-                if (!IsInside(r, c)) return false;
-                if (occ[r * W + c]) return false;
-            }
-            return true;
-        }
-
-        public void Place(ShapeData s, int anchorR, int anchorC)
-        {
-            foreach (var cell in s.GetFilledCells())
-            {
-                int r = anchorR + cell.x;
-                int c = anchorC + cell.y;
-                occ[r * W + c] = true;
-            }
-        }
-
-        public IEnumerable<(int r, int c)> AllAnchorsFor(ShapeData s)
-        {
-            var b = s.GetBounds();
-            if (b.maxR < b.minR) yield break;
-
-            int sh = b.maxR - b.minR + 1;
-            int sw = b.maxC - b.minC + 1;
-
-            for (int r = -b.minR; r <= H - sh; r++)
-            {
-                for (int c = -b.minC; c <= W - sw; c++)
-                {
-                    if (CanPlace(s, r, c)) yield return (r, c);
-                }
-            }
-        }
-
-        public int CountLinesCompletedIfPlaced(ShapeData s, int anchorR, int anchorC)
-        {
-            // apply into temp occupancy
-            var tmp = new bool[occ.Length];
-            Array.Copy(occ, tmp, occ.Length);
-
-            foreach (var cell in s.GetFilledCells())
-            {
-                int r = anchorR + cell.x;
-                int c = anchorC + cell.y;
-                if (IsInside(r, c)) tmp[r * W + c] = true;
-            }
-
-            int clears = 0;
-            // rows
-            for (int r = 0; r < H; r++)
-            {
-                bool full = true;
-                for (int c = 0; c < W; c++)
-                    if (!tmp[r * W + c]) { full = false; break; }
-                if (full) clears++;
-            }
-            // cols
-            for (int c = 0; c < W; c++)
-            {
-                bool full = true;
-                for (int r = 0; r < H; r++)
-                    if (!tmp[r * W + c]) { full = false; break; }
-                if (full) clears++;
-            }
-            return clears;
-        }
-    }
-
-    // ========================= DDA & Smart picking (giữ nguyên) =========================
-    private ClassWeights ComputeWeightsWithDDA()
-    {
-        var W = config.baseWeights;
-        W.Normalize();
-
-        bool tight = false;
-        if (board != null && board.State != null)
-        {
-            int H = board.State.Height, WW = board.State.Width;
-            int occ = 0;
-            for (int r = 0; r < H; r++)
-                for (int c = 0; c < WW; c++)
-                    if (board.State.IsOccupied(r, c)) occ++;
-
-            float freeRatio = 1f - (float)occ / (WW * H);
-            tight = freeRatio < config.tightBoardFreeThreshold;
-        }
-
-        if (tight)
-        {
-            W.small *= config.tightSmallBoost;
-            W.line *= config.tightLineBoost;
-            W.large *= config.tightLargePenalty;
-        }
-
-        float t = Mathf.Clamp01(config.rampRefillsToMax <= 0 ? 1f : (float)_refillCount / config.rampRefillsToMax);
-        float smallMul = Mathf.Lerp(1f, config.rampSmallPenalty, t);
-        float largeMul = Mathf.Lerp(1f, config.rampLargeBoost, t);
-        W.small *= smallMul;
-        W.large *= largeMul;
-
-        W.Normalize();
-        return W;
-    }
-
-    private List<ShapeData> BuildHandSmart(int count)
-    {
-        var state = board != null ? board.State : null;
-
-        for (int attempt = 0; attempt < config.maxHandBuildAttempts; attempt++)
-        {
-            var weights = ComputeWeightsWithDDA();
-            var hand = new List<ShapeData>(count);
-            int placeableSlots = 0;
-
-            for (int i = 0; i < count; i++)
-            {
-                bool forceLine = _rng.NextDouble() < config.forceLineClearChance;
-                bool mustBePlaceable = (placeableSlots < config.requiredPlaceableSlots);
-
-                var pick = PickOneShapeSmart(state, hand, weights, forceLine, mustBePlaceable);
-                hand.Add(pick);
-
-                if (state == null || CountPlacements(pick, state) > 0) placeableSlots++;
-            }
-
-            if (placeableSlots >= Mathf.Max(0, config.requiredPlaceableSlots))
-                return hand;
-        }
-
-        if (!config.enablePity) return BuildFallbackRandom(count);
-        return BuildPityHand(count, board != null ? board.State : null);
-    }
-
-    private List<ShapeData> BuildFallbackRandom(int count)
-    {
-        var hand = new List<ShapeData>(count);
-        for (int i = 0; i < count; i++) hand.Add(library.GetRandom());
-        return hand;
-    }
-
-    private List<ShapeData> BuildPityHand(int count, BoardState state)
-    {
-        var hand = new List<ShapeData>(count);
-        int guaranteed = Mathf.Min(config.pityRescueSlots, count);
-        for (int i = 0; i < guaranteed; i++) hand.Add(PickSmallAndPlaceable(state));
-
-        var weights = ComputeWeightsWithDDA();
-        for (int i = guaranteed; i < count; i++)
-            hand.Add(PickOneShapeSmart(state, hand, weights, false, false));
-
-        return hand;
-    }
-
+    // ---------- Smart picker ----------
     private ShapeData PickSmallAndPlaceable(BoardState state)
     {
         for (int tries = 0; tries < 64; tries++)
@@ -587,8 +824,6 @@ public class ShapePalette : MonoBehaviour
     {
         ShapeClass targetClass = forceLine ? ShapeClass.Line : RollClass(weights);
 
-        ShapeData best = null;
-        float bestScore = float.NegativeInfinity;
         var top = new List<(ShapeData s, float score)>();
 
         for (int t = 0; t < Mathf.Max(1, config.samplesPerSlot); t++)
@@ -615,7 +850,6 @@ public class ShapePalette : MonoBehaviour
                     if (top[i].score < min) { min = top[i].score; idxMin = i; }
                 if (score > min) top[idxMin] = (cand, score);
             }
-            if (score > bestScore) { bestScore = score; best = cand; }
         }
 
         if (top.Count == 0)
@@ -638,27 +872,34 @@ public class ShapePalette : MonoBehaviour
         public int cells;
         public int placements;
         public int maxLineClears;
+        public int bestChainPotential; // số line gần full (thiếu 1 ô) tốt nhất sau khi thử đặt
         public bool anyPlaceable => placements > 0;
     }
 
     private Eval EvaluateShape(ShapeData s, BoardState state)
     {
-        var e = new Eval { cells = CountCells(s), placements = 0, maxLineClears = 0 };
+        var e = new Eval { cells = CountCells(s), placements = 0, maxLineClears = 0, bestChainPotential = 0 };
         if (state == null) return e;
 
         var b = s.GetBounds();
         if (b.maxR < b.minR) return e;
 
         int W = state.Width, H = state.Height;
+        var snap = new BoardSnapshot(state);
+
         for (int r = -b.minR; r <= H - (b.maxR - b.minR + 1); r++)
         {
             for (int c = -b.minC; c <= W - (b.maxC - b.minC + 1); c++)
             {
-                if (!state.CanPlace(s, r, c)) continue;
+                if (!snap.CanPlace(s, r, c)) continue;
                 e.placements++;
 
-                int clears = CountLinesCompletedIfPlaced_OnBoardState(state, s, r, c);
+                int clears = snap.CountLinesCompletedIfPlaced(s, r, c);
                 if (clears > e.maxLineClears) e.maxLineClears = clears;
+
+                // Ưu tiên giữ chuỗi: đếm số line còn thiếu 1 ô (row/col) sau khi đặt thử
+                int near = snap.CountNearFullLinesIfPlaced(s, r, c, missing: 1);
+                if (near > e.bestChainPotential) e.bestChainPotential = near;
             }
         }
         return e;
@@ -668,15 +909,17 @@ public class ShapePalette : MonoBehaviour
     {
         float score = 0f;
         if (e.anyPlaceable) score += config.wPlaceable;
+
         score += config.wPlacementCount * AdjustToTarget(e.placements, config.minPlacementsTarget, config.maxPlacementsTarget);
         score += config.wLineClear * e.maxLineClears;
+        score += config.wChainPotential * e.bestChainPotential;   // mới
         score += config.wArea * e.cells;
 
         int sameArea = 0;
         foreach (var x in currentHand) if (x != null && CountCells(x) == e.cells) sameArea++;
         score -= 0.5f * sameArea;
 
-        score += (float)_rng.NextDouble() * 0.01f;
+        score += (float)_rng.NextDouble() * 0.01f; // break ties
         return score;
     }
 
@@ -709,39 +952,6 @@ public class ShapePalette : MonoBehaviour
             for (int c = -b.minC; c <= W - (b.maxC - b.minC + 1); c++)
                 if (state.CanPlace(s, r, c)) count++;
         return count;
-    }
-
-    private int CountLinesCompletedIfPlaced_OnBoardState(BoardState state, ShapeData s, int anchorRow, int anchorCol)
-    {
-        int W = state.Width, H = state.Height;
-        var proposed = new bool[W * H];
-        for (int r = 0; r < H; r++)
-            for (int c = 0; c < W; c++)
-                proposed[r * W + c] = state.IsOccupied(r, c);
-
-        foreach (var cell in s.GetFilledCells())
-        {
-            int r = anchorRow + cell.x;
-            int c = anchorCol + cell.y;
-            if (r >= 0 && r < H && c >= 0 && c < W) proposed[r * W + c] = true;
-        }
-
-        int clears = 0;
-        for (int r = 0; r < H; r++)
-        {
-            bool full = true;
-            for (int c = 0; c < W; c++)
-                if (!proposed[r * W + c]) { full = false; break; }
-            if (full) clears++;
-        }
-        for (int c = 0; c < W; c++)
-        {
-            bool full = true;
-            for (int r = 0; r < H; r++)
-                if (!proposed[r * W + c]) { full = false; break; }
-            if (full) clears++;
-        }
-        return clears;
     }
 
     private ShapeClass Classify(ShapeData s)
