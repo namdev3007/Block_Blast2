@@ -1,10 +1,11 @@
 🧱 Blockblast — Unity Puzzle
-<img width="330" height="590" alt="image" src="https://github.com/user-attachments/assets/7f358f07-6434-4e56-8c6d-83f8154d1cad" />
 
 A tactile, combo-chasing block puzzler with juicy UI, smart piece spawning, and arcade-style scoring.
 ✨ Highlights
 
 Crisp grid UX with hover/line previews, place-flash, intro wave and clear-pop animations (DOTween).
+<img width="330" height="590" alt="image" src="https://github.com/user-attachments/assets/b1189006-62b8-44e0-8f53-a08b0d944459" />
+
 <img width="342" height="593" alt="image" src="https://github.com/user-attachments/assets/80370d24-cc33-446f-b91f-bf4a9f4fd755" />
 
 Smart spawn system (Triplet Bag, hole-filler, placeable guarantee, line-chaser bias) → fewer soft-locks, more clever turns.
