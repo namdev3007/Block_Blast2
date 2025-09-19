@@ -14,14 +14,14 @@ public class GridView : MonoBehaviour
     [Header("Layout (UI Grid)")]
     public Vector2 cellSize = new Vector2(96, 96);
     public Vector2 spacing = new Vector2(6, 6);
-    public RectOffset padding;                  
-    public bool centerGrid = true;           
+    public RectOffset padding;                 // có thể để trống → sẽ dùng (0,0,0,0)
+    public bool centerGrid = true;
 
     [Header("Prefabs/Refs")]
-    public GameObject gridSquarePrefab;   
-    public RectTransform contentRoot;       
+    public GameObject gridSquarePrefab;
+    public RectTransform contentRoot;          // để trống → dùng chính RectTransform của component
 
-    // Data
+    // ===== Runtime data =====
     private readonly List<GridSquareView> _cells = new();
     private readonly Dictionary<GridRegion, List<GridSquareView>> _byRegion = new()
     {
@@ -32,31 +32,44 @@ public class GridView : MonoBehaviour
     };
 
     private GridLayoutGroup _layout;
-    private BoardModel _model;
+
+    // Reuse list để tránh GC mỗi lần raycast
+    private static readonly List<RaycastResult> s_RaycastResults = new(32);
+
+    private RectTransform RootRT => contentRoot ? contentRoot : (RectTransform)transform;
+
+    public IReadOnlyList<GridSquareView> Cells => _cells;
+    public IReadOnlyDictionary<GridRegion, List<GridSquareView>> CellsByRegion => _byRegion;
+
+    private void Awake()
+    {
+        EnsureLayout();
+    }
 
     private void Start()
     {
         Build();
     }
-    public IReadOnlyList<GridSquareView> Cells => _cells;
-    public IReadOnlyDictionary<GridRegion, List<GridSquareView>> CellsByRegion => _byRegion;
 
-    void Awake()
+    private void Reset()
     {
         EnsureLayout();
     }
 
-    void Reset()
+    private void OnValidate()
     {
+        // Clamp & cập nhật layout ngay trên Inspector
+        columns = Mathf.Max(1, columns);
+        rows = Mathf.Max(1, rows);
         EnsureLayout();
     }
 
     private void EnsureLayout()
     {
-        var root = contentRoot ? contentRoot : GetComponent<RectTransform>();
+        var root = RootRT;
         if (!_layout)
         {
-            _layout = root.gameObject.GetComponent<GridLayoutGroup>();
+            _layout = root.GetComponent<GridLayoutGroup>();
             if (!_layout) _layout = root.gameObject.AddComponent<GridLayoutGroup>();
         }
 
@@ -70,18 +83,33 @@ public class GridView : MonoBehaviour
         _layout.constraintCount = columns;
     }
 
+    [ContextMenu("Rebuild")]
     public void Build()
     {
         EnsureLayout();
 
-        _model = new BoardModel(columns, rows);
+        if (!gridSquarePrefab)
+        {
+            Debug.LogError($"{name}: gridSquarePrefab chưa gán!");
+            return;
+        }
 
-        // Clear cũ
-        foreach (Transform child in (contentRoot ? contentRoot : transform))
-            DestroyImmediate(child.gameObject);
+        // Clear cũ (PlayMode -> Destroy, Editor edit-time -> DestroyImmediate)
+        var parent = RootRT;
+        for (int i = parent.childCount - 1; i >= 0; i--)
+        {
+#if UNITY_EDITOR
+            if (!Application.isPlaying) { DestroyImmediate(parent.GetChild(i).gameObject); }
+            else { Destroy(parent.GetChild(i).gameObject); }
+#else
+            Destroy(parent.GetChild(i).gameObject);
+#endif
+        }
 
         _cells.Clear();
         foreach (var kv in _byRegion) kv.Value.Clear();
+
+        _cells.Capacity = rows * columns;
 
         // Sinh mới
         int idx = 0;
@@ -89,13 +117,15 @@ public class GridView : MonoBehaviour
         {
             for (int c = 0; c < columns; c++)
             {
-                var parent = contentRoot ? contentRoot : transform as RectTransform;
                 var go = Instantiate(gridSquarePrefab, parent);
                 go.name = $"Cell_{r}_{c}";
 
+                // Đảm bảo có RectTransform
+                if (!go.TryGetComponent<RectTransform>(out _))
+                    go.AddComponent<RectTransform>();
+
                 var view = go.GetComponent<GridSquareView>();
-                if (!view)
-                    view = go.AddComponent<GridSquareView>(); // đảm bảo có view
+                if (!view) view = go.AddComponent<GridSquareView>();
 
                 var region = ComputeRegion(r, c, rows, columns);
                 view.Init(idx, r, c, region);
@@ -124,12 +154,12 @@ public class GridView : MonoBehaviour
         if (raycaster == null || EventSystem.current == null) return false;
 
         var ped = new PointerEventData(EventSystem.current) { position = screenPoint };
-        var results = new List<RaycastResult>();
-        raycaster.Raycast(ped, results);
+        s_RaycastResults.Clear();
+        raycaster.Raycast(ped, s_RaycastResults);
 
-        foreach (var r in results)
+        for (int i = 0; i < s_RaycastResults.Count; i++)
         {
-            var v = r.gameObject.GetComponentInParent<GridSquareView>();
+            var v = s_RaycastResults[i].gameObject.GetComponentInParent<GridSquareView>();
             if (v != null)
             {
                 cell = v; row = v.Row; col = v.Col;
@@ -138,21 +168,10 @@ public class GridView : MonoBehaviour
         }
         return false;
     }
-    private static GridRegion ComputeRegion(int row, int col, int totalRows, int totalCols)
-    {
-        // Chia làm 2 nửa theo hàng/ cột
-        bool isTop = row < totalRows / 2;
-        bool isLeft = col < totalCols / 2;
 
-        if (isTop && isLeft) return GridRegion.TopLeft;
-        if (isTop && !isLeft) return GridRegion.TopRight;
-        if (!isTop && isLeft) return GridRegion.BottomLeft;
-        return GridRegion.BottomRight;
-    }
     public bool TryGetSquareCenterWorld(int row, int col, out Vector3 world)
     {
         world = default;
-
         var cell = GetCell(row, col);
         if (cell == null) return false;
 
@@ -162,24 +181,17 @@ public class GridView : MonoBehaviour
         world = rt.TransformPoint((Vector3)rt.rect.center);
         return true;
     }
+
     public bool TryGetSquareCenterScreen(int row, int col, Camera uiCamera, out Vector2 screen)
     {
         screen = default;
+        if (!TryGetSquareCenterWorld(row, col, out var world)) return false;
 
-        var cell = GetCell(row, col);
-        if (cell == null) return false;
-
-        var rt = cell.GetComponent<RectTransform>();
-        if (rt == null) return false;
-
-        // Tâm local của rect
-        Vector3 localCenter = (Vector3)rt.rect.center;
-        // Đổi sang world
-        Vector3 world = rt.TransformPoint(localCenter);
         // World -> screen (uiCamera có thể null nếu Canvas Overlay)
         screen = RectTransformUtility.WorldToScreenPoint(uiCamera, world);
         return true;
     }
+
     public bool TryGetNearestCellByScreenPoint(
         Vector2 screenPoint, Camera uiCamera,
         out GridSquareView cell, out int row, out int col)
@@ -206,5 +218,14 @@ public class GridView : MonoBehaviour
         return cell != null;
     }
 
+    private static GridRegion ComputeRegion(int row, int col, int totalRows, int totalCols)
+    {
+        bool isTop = row < totalRows / 2;
+        bool isLeft = col < totalCols / 2;
 
+        if (isTop && isLeft) return GridRegion.TopLeft;
+        if (isTop && !isLeft) return GridRegion.TopRight;
+        if (!isTop && isLeft) return GridRegion.BottomLeft;
+        return GridRegion.BottomRight;
+    }
 }

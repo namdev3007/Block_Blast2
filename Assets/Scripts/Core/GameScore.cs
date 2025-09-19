@@ -28,6 +28,10 @@ public class GameScore : MonoBehaviour
     [Tooltip("Nhân điểm ô theo combo hay không.")]
     public bool applyComboToBlockCells = false;
 
+    [Header("Bonuses")]
+    [Tooltip("Điểm thưởng khi sau lượt này bàn sạch hoàn toàn.")]
+    public int boardClearBonus = 240;
+
     [Header("Runtime (read-only)")]
     [SerializeField] private int totalScore;
     [SerializeField] private int moveCount;
@@ -58,15 +62,26 @@ public class GameScore : MonoBehaviour
         moveCount++;
 
         int prevDry = dryStreak;
-        bool armed = prevDry >= 3;   // đang trong trạng thái “cảnh báo” combo
+        bool armed = prevDry >= 3;
         bool rescued = false;
 
+        // combo dùng để tính điểm của lượt này (trước khi có thay đổi)
         int comboUsed = comboLevel;
 
+        // Nếu đang armed:
+        // - Clear được -> "rescue" (giữ combo hiện tại để nhân điểm, sau đó vẫn tăng như bình thường)
+        // - Không clear -> mất combo về 1 (comboUsed cũng cập nhật về 1 để tính điểm lượt này)
         if (armed)
         {
-            if (linesCleared > 0) { rescued = true; /* giữ comboUsed như cũ */ }
-            else { comboLevel = 1; comboUsed = comboLevel; }
+            if (linesCleared > 0)
+            {
+                rescued = true;
+            }
+            else
+            {
+                comboLevel = 1;
+                comboUsed = comboLevel;
+            }
         }
 
         float comboMult = ComboMultiplier(comboUsed);
@@ -81,22 +96,64 @@ public class GameScore : MonoBehaviour
         int gain = blockFinal + lineFinal;
         totalScore += gain;
 
-        if (linesCleared > 0) { dryStreak = 0; comboLevel += 1; }
-        else { dryStreak = prevDry + 1; }
+        // Lưu lại combo cũ để kiểm tra thay đổi
+        int oldCombo = comboLevel;
+
+        // Cập nhật dry/combo sau khi chấm điểm
+        if (linesCleared > 0)
+        {
+            dryStreak = 0;
+            comboLevel += 1; // tăng combo khi clear thành công
+        }
+        else
+        {
+            dryStreak = prevDry + 1;
+            // nếu không armed, combo giữ nguyên; nếu armed mà không clear thì đã reset ở trên
+        }
+
+        // CHỈ phát SFX khi combo thực sự thay đổi (tăng hoặc reset)
+        if (comboLevel != oldCombo && AudioManager.Instance != null)
+        {
+            AudioManager.Instance.PlayComboTier(comboLevel);
+        }
 
         var result = new ScoreResult
         {
             moveIndex = moveCount,
             blockCells = blockCells,
             linesCleared = linesCleared,
-            comboBefore = comboUsed,   // vẫn trả cấp combo
-            comboAfter = comboLevel,   // cấp mới sau lượt này
+            comboBefore = comboUsed,
+            comboAfter = comboLevel,
             linePointsBase = lineBase,
             linePointsFinal = lineFinal,
             blockPoints = blockFinal,
             totalGain = gain,
             rescuedCombo = rescued,
             wasArmed = armed
+        };
+
+        Scored?.Invoke(result);
+        return result;
+    }
+
+    public ScoreResult AwardBoardClearBonus(int? custom = null)
+    {
+        int bonus = custom ?? boardClearBonus;
+        totalScore += bonus;
+
+        var result = new ScoreResult
+        {
+            moveIndex = moveCount, // vẫn là lượt hiện tại
+            blockCells = 0,
+            linesCleared = 0,
+            comboBefore = comboLevel,
+            comboAfter = comboLevel,
+            linePointsBase = 0,
+            linePointsFinal = 0,
+            blockPoints = 0,
+            totalGain = bonus,
+            rescuedCombo = false,
+            wasArmed = false
         };
 
         Scored?.Invoke(result);

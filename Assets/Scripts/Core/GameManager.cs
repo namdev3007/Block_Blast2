@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 public enum GameState { Boot, Playing, Paused, GameOver }
@@ -12,15 +11,14 @@ public class GameManager : MonoBehaviour
     public BoardRuntime board;
     public ShapePalette palette;
     public GameScore score;
-    public PopupManager popup;   // có thể null nếu bạn đã hiển thị popup từ ShapeDragItem
+    public PopupManager popup;   // optional
     public UIManager ui;         // gán trong Scene
 
     [Header("Options")]
-    public bool autoStartOnAwake = true;
+    public bool autoStartOnAwake = false;   // để FALSE: vào Home trước
 
     public GameState State { get; private set; } = GameState.Boot;
 
-    // Sự kiện cho UI/khác
     public event Action<GameState> GameStateChanged;
     public event Action GameStarted;
 
@@ -32,49 +30,70 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
-        if (autoStartOnAwake)
-            StartNewGame();
+        if (autoStartOnAwake) StartNewGame();
+        else GoHome();
     }
 
-    // ===== API chính =====
+    // ====== HOME ======
+    public void GoHome()
+    {
+        Time.timeScale = 1f;
+        SetState(GameState.Boot);      // dùng Boot như trạng thái Home
+        ui?.ShowHome(true);
+        ui?.ShowHUD(false);
+        ui?.ShowSettingPanel(false);
+    }
+
+    // Gán hàm này vào nút Start ở màn hình Home
+    public void OnStartButtonPressed()
+    {
+        AudioManager.Instance?.PlayClick();
+        StartNewGame();
+    }
+
+    // ====== GAME FLOW ======
     public void StartNewGame(int? seed = null)
     {
         // Reset score
         if (score != null) score.ResetAll();
 
-        // Reset board (seed tuỳ ý)
+        // Reset board + seed
         if (board != null)
         {
-            // Xoá sạch
+            // xoá sạch
             board.SeedRandomOccupied(0, 0, true);
-            // Nếu muốn seed ban đầu:
+            // seed ban đầu nếu muốn
             if (board.seedAtStart)
-                board.SeedRandomOccupied(board.initialMinOccupied, board.initialMaxOccupied, board.avoidFullRowsCols);
+                board.ResetAndSeed(board.initialMinOccupied, board.initialMaxOccupied, board.avoidFullRowsCols);
+
+            // >>> Chỉ chạy wave sau khi bấm Start <<<
+            board.PlayIntroWave(); // dùng config bên BoardRuntime
         }
 
         // Refill hand
-        if (palette != null)
-            palette.Refill();
+        if (palette != null) palette.Refill();
 
+        Time.timeScale = 1f;
         SetState(GameState.Playing);
         GameStarted?.Invoke();
+
+        // UI
+        ui?.ShowHome(false);
         ui?.ShowHUD(true);
-        //ui?.ShowGameOverPanel(false);
+        ui?.ShowSettingPanel(false);
     }
 
     public void Pause()
     {
         if (State != GameState.Playing) return;
-        SetState(GameState.Paused);
         Time.timeScale = 0f;
-        ui?.ShowPausePanel(true);
+        SetState(GameState.Paused);
     }
 
     public void Resume()
     {
         if (State != GameState.Paused) return;
         Time.timeScale = 1f;
-        ui?.ShowPausePanel(false);
         SetState(GameState.Playing);
     }
 
@@ -84,7 +103,6 @@ public class GameManager : MonoBehaviour
         StartNewGame();
     }
 
-
     private void SetState(GameState s)
     {
         if (State == s) return;
@@ -92,5 +110,4 @@ public class GameManager : MonoBehaviour
         GameStateChanged?.Invoke(State);
         ui?.OnGameStateChanged(State);
     }
-
 }

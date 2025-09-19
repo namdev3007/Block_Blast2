@@ -1,283 +1,271 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.Audio;
+using System.Collections;
+using System.Collections.Generic; // <== thêm
 
 public class AudioManager : MonoBehaviour
 {
     public static AudioManager Instance { get; private set; }
 
-    [Header("Mixer (optional)")]
-    public AudioMixer mixer;                 // Có thể để trống
-    public string bgmVolumeParam = "BGMVol"; // Tên Exposed Param trong Mixer (nếu dùng)
-    public string sfxVolumeParam = "SFXVol";
-
-    [Header("Default Clips")]
+    [Header("Clips & Mixer")]
     public AudioClip defaultBgm;
+    public AudioMixer mixer;
+    public string bgmVolumeParam = "BGMVol";
+    public string sfxVolumeParam = "SFXVol";
+    [Tooltip("Group đầu ra cho BGM phải thuộc Mixer có expose BGMVol")]
+    public AudioMixerGroup musicGroup;
+    [Tooltip("Group đầu ra cho SFX phải thuộc Mixer có expose SFXVol")]
+    public AudioMixerGroup sfxGroup;
+
+    [Header("UI / Meta SFX")]
     public AudioClip clickSfx;
+    public AudioClip startGameSfx;
+
+    [Header("Gameplay SFX")]
+    public AudioClip pickupSfx;
+    public AudioClip dropSfx;
+    public AudioClip[] clearComboSfxByTier;
+
+    [Header("Praise SFX")]
+    public AudioClip goodSfx;       // 2
+    public AudioClip greatSfx;      // 3
+    public AudioClip excellentSfx;  // 4
+    public AudioClip fantasticSfx;  // 5
+    public AudioClip legendarySfx;  // 6+
+    public AudioClip unbelievableSfx;
 
     [Header("Sources")]
-    [Tooltip("2 nguồn BGM để crossfade")]
-    public AudioSource bgmA;
-    public AudioSource bgmB;
+    public AudioSource musicSource;       // loop BGM
+    public AudioSource sfxSource;         // one-shot SFX (giữ lại để tương thích)
 
-    [Tooltip("Pool AudioSource phát SFX")]
-    public int sfxPoolSize = 6;
-    public AudioSource sfxTemplate; // AudioSource mẫu (mute clip) để clone làm pool
+    [Header("SFX Polyphony & Anti-Spam")]
+    [Tooltip("Số voice SFX có thể phát chồng cùng lúc")]
+    public int sfxPolyphony = 8;
+    [Tooltip("Giãn cách phát lại cùng 1 clip (ms) để tránh spam)")]
+    public int sameClipCooldownMs = 35;
+    [Tooltip("Jitter cao độ để bớt nhàm chán")]
+    public float pitchJitter = 0.08f;
 
-    [Header("Volumes")]
-    [Range(0f, 1f)] public float bgmVolume = 0.8f;
-    [Range(0f, 1f)] public float sfxVolume = 1f;
+    // PlayerPrefs keys
+    public const string KEY_MUSIC = "Audio.MusicEnabled";
+    public const string KEY_SFX = "Audio.SfxEnabled";
+    public const string KEY_MUSIC_VOL = "Audio.MusicVol01"; // 0..1
+    public const string KEY_SFX_VOL = "Audio.SfxVol01";     // 0..1
 
-    [Header("Tweaks")]
-    [Tooltip("Thời gian crossfade giữa hai track BGM.")]
-    public float bgmCrossfade = 0.75f;
-    [Tooltip("Độ dao động pitch ngẫu nhiên cho SFX.")]
-    [Range(0f, 0.5f)] public float sfxPitchJitter = 0.03f;
+    private bool _musicEnabled = true;
+    private bool _sfxEnabled = true;
 
-    // ==== Persistence keys ====
-    private const string PREF_BGM = "am_bgm";
-    private const string PREF_SFX = "am_sfx";
-    private const string PREF_MUSIC_ON = "am_music_on";
-    private const string PREF_SFX_ON = "am_sfx_on";
+    [Range(0f, 1f)][SerializeField] private float _musicVolume = 1f;
+    [Range(0f, 1f)][SerializeField] private float _sfxVolume = 1f;
 
-    // ==== Runtime ====
-    private readonly List<AudioSource> _sfxPool = new();
-    private bool _useA = true; // đang dùng A phát nhạc, B để crossfade
-    private Coroutine _xfadeRoutine;
-    private float _cachedSfxMaster = 1f;
+    // ==== NEW: SFX voice pool & anti-spam ====
+    private AudioSource[] _sfxVoices;
+    private int _sfxVoiceCursor = 0;
+    private readonly Dictionary<AudioClip, float> _lastPlayTime = new(); // clip -> Time.unscaledTime
 
-    // Bật/tắt nhạc & sfx
-    [SerializeField] private bool musicEnabled = true;
-    [SerializeField] private bool sfxEnabled = true;
-
-    public bool MusicEnabled => musicEnabled;
-    public bool SfxEnabled => sfxEnabled;
-
-    private void Awake()
+    void Awake()
     {
-        // Singleton
-        if (Instance != null && Instance != this)
-        {
-            Destroy(gameObject);
-            return;
-        }
+        if (Instance && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
+        DontDestroyOnLoad(gameObject);
 
-        // (Tùy chọn) Giữ qua scene – CHỈ nếu là root để tránh warning
-        if (transform.parent == null)
-            DontDestroyOnLoad(gameObject);
+        _musicEnabled = PlayerPrefs.GetInt(KEY_MUSIC, 1) == 1;
+        _sfxEnabled = PlayerPrefs.GetInt(KEY_SFX, 1) == 1;
+        _musicVolume = PlayerPrefs.GetFloat(KEY_MUSIC_VOL, 1f);
+        _sfxVolume = PlayerPrefs.GetFloat(KEY_SFX_VOL, 1f);
 
-        // Load prefs
-        bgmVolume = PlayerPrefs.GetFloat(PREF_BGM, bgmVolume);
-        sfxVolume = PlayerPrefs.GetFloat(PREF_SFX, sfxVolume);
-        musicEnabled = PlayerPrefs.GetInt(PREF_MUSIC_ON, 1) == 1;
-        sfxEnabled = PlayerPrefs.GetInt(PREF_SFX_ON, 1) == 1;
+        if (musicSource && musicGroup) musicSource.outputAudioMixerGroup = musicGroup;
+        if (sfxSource && sfxGroup) sfxSource.outputAudioMixerGroup = sfxGroup;
 
-        // Prepare SFX pool
-        BuildSfxPool();
+        // NEW: tạo voice pool
+        BuildSfxVoices();
 
-        // Áp âm lượng + cờ on/off
-        ApplyVolumes();
-
-        // Phát nhạc nền mặc định (nếu có)
-        if (defaultBgm)
-            PlayBGM(defaultBgm, forceInstant: true);
+        UpdateMusicGain();
+        UpdateSfxGain();
     }
 
-    private void BuildSfxPool()
+    void Start()
     {
-        if (sfxTemplate == null)
-        {
-            // Tạo tạm nếu quên kéo thả
-            var go = new GameObject("SFX_Template");
-            go.transform.SetParent(transform);
-            sfxTemplate = go.AddComponent<AudioSource>();
-            sfxTemplate.playOnAwake = false;
-            sfxTemplate.loop = false;
-            sfxTemplate.spatialBlend = 0f;
-        }
-
-        for (int i = 0; i < sfxPoolSize; i++)
-        {
-            var s = Instantiate(sfxTemplate, transform);
-            s.name = $"SFX_{i:00}";
-            _sfxPool.Add(s);
-        }
+        StartCoroutine(BootAtEndOfFrame());
     }
 
-    // ================== Public API ==================
-
-    public void PlayClick()
+    private void BuildSfxVoices()
     {
-        if (clickSfx) PlaySFX(clickSfx);
+        // tái dùng sfxSource làm voice[0] để tương thích
+        sfxPolyphony = Mathf.Max(1, sfxPolyphony);
+        _sfxVoices = new AudioSource[sfxPolyphony];
+        for (int i = 0; i < sfxPolyphony; i++)
+        {
+            if (i == 0 && sfxSource != null)
+            {
+                _sfxVoices[0] = sfxSource;
+            }
+            else
+            {
+                var go = new GameObject($"SFX_Voice_{i}");
+                go.transform.SetParent(transform, false);
+                var src = go.AddComponent<AudioSource>();
+                src.playOnAwake = false;
+                src.loop = false;
+                src.outputAudioMixerGroup = sfxGroup ? sfxGroup : (sfxSource ? sfxSource.outputAudioMixerGroup : null);
+                _sfxVoices[i] = src;
+            }
+        }
+        _sfxVoiceCursor = 0;
     }
 
-    public void PlaySFX(AudioClip clip, float volume01 = 1f, float pitch = 1f)
+    IEnumerator BootAtEndOfFrame()
     {
-        if (!sfxEnabled || clip == null) return;
-
-        var src = GetFreeSfxSource();
-        if (!src) return;
-
-        src.pitch = pitch * (1f + Random.Range(-sfxPitchJitter, sfxPitchJitter));
-        src.volume = Mathf.Clamp01(_cachedSfxMaster) * Mathf.Clamp01(volume01);
-        src.clip = clip;
-        src.Play();
+        yield return null;
+        UpdateMusicGain();
+        UpdateSfxGain();
+        EnsureBgmPlaying();
     }
 
-    /// <summary>
-    /// Phát BGM với crossfade (hoặc phát ngay nếu forceInstant = true).
-    /// </summary>
-    public void PlayBGM(AudioClip bgm, bool forceInstant = false)
+    private void EnsureBgmPlaying()
     {
-        if (bgm == null) return;
+        if (!musicSource) return;
+        if (!musicSource.clip) musicSource.clip = defaultBgm;
 
-        var from = _useA ? bgmA : bgmB;
-        var to = _useA ? bgmB : bgmA;
-        _useA = !_useA;
-
-        if (to == null)
+        if (_musicEnabled && musicSource.clip && !musicSource.isPlaying)
         {
-            Debug.LogWarning("AudioManager: Missing BGM source!");
-            return;
+            AudioListener.pause = false;
+            musicSource.PlayDelayed(0.01f);
         }
-
-        to.clip = bgm;
-        to.loop = true;
-        to.volume = forceInstant ? (musicEnabled ? bgmVolume : 0f) : 0f;
-        to.Play();
-
-        if (_xfadeRoutine != null) StopCoroutine(_xfadeRoutine);
-
-        if (forceInstant || from == null)
+        else if (!_musicEnabled && musicSource.isPlaying)
         {
-            if (from) { from.Stop(); from.volume = 0f; }
-            to.volume = musicEnabled ? bgmVolume : 0f;
-        }
-        else
-        {
-            _xfadeRoutine = StartCoroutine(CrossfadeRoutine(from, to, bgmCrossfade));
+            musicSource.Pause();
         }
     }
 
-    public void StopBGM(bool fadeOut = true, float fadeTime = 0.5f)
+    private static float Volume01ToDb(float v01)
     {
-        var cur = _useA ? bgmB : bgmA;
-        if (cur == null) return;
-
-        if (!fadeOut)
-        {
-            cur.Stop();
-            cur.volume = 0f;
-            return;
-        }
-        StartCoroutine(FadeOutAndStop(cur, fadeTime));
+        if (v01 <= 0.0001f) return -80f;
+        return Mathf.Log10(Mathf.Clamp01(v01)) * 20f;
     }
 
+    private void UpdateMusicGain()
+    {
+        if (!mixer) return;
+        float v = _musicEnabled ? _musicVolume : 0f;
+        mixer.SetFloat(bgmVolumeParam, Volume01ToDb(v));
+    }
+
+    private void UpdateSfxGain()
+    {
+        if (!mixer) return;
+        float v = _sfxEnabled ? _sfxVolume : 0f;
+        mixer.SetFloat(sfxVolumeParam, Volume01ToDb(v));
+    }
+
+    // ===== Settings API =====
     public void SetMusicEnabled(bool on)
     {
-        musicEnabled = on;
-        PlayerPrefs.SetInt(PREF_MUSIC_ON, on ? 1 : 0);
-        ApplyVolumes();
+        _musicEnabled = on;
+        PlayerPrefs.SetInt(KEY_MUSIC, on ? 1 : 0);
+        PlayerPrefs.Save();
+        UpdateMusicGain();
+
+        if (!musicSource) return;
+        if (on)
+        {
+            if (!musicSource.clip) musicSource.clip = defaultBgm;
+            EnsureBgmPlaying();
+        }
+        else musicSource.Pause();
     }
 
     public void SetSfxEnabled(bool on)
     {
-        sfxEnabled = on;
-        PlayerPrefs.SetInt(PREF_SFX_ON, on ? 1 : 0);
-        ApplyVolumes();
+        _sfxEnabled = on;
+        PlayerPrefs.SetInt(KEY_SFX, on ? 1 : 0);
+        PlayerPrefs.Save();
+        UpdateSfxGain();
     }
 
-    public void SetBgmVolume(float v)
+    public void SetMusicVolume01(float v01)
     {
-        bgmVolume = Mathf.Clamp01(v);
-        PlayerPrefs.SetFloat(PREF_BGM, bgmVolume);
-        ApplyVolumes();
+        _musicVolume = Mathf.Clamp01(v01);
+        PlayerPrefs.SetFloat(KEY_MUSIC_VOL, _musicVolume);
+        PlayerPrefs.Save();
+        UpdateMusicGain();
+        EnsureBgmPlaying();
     }
 
-    public void SetSfxVolume(float v)
+    public void SetSfxVolume01(float v01)
     {
-        sfxVolume = Mathf.Clamp01(v);
-        PlayerPrefs.SetFloat(PREF_SFX, sfxVolume);
-        ApplyVolumes();
+        _sfxVolume = Mathf.Clamp01(v01);
+        PlayerPrefs.SetFloat(KEY_SFX_VOL, _sfxVolume);
+        PlayerPrefs.Save();
+        UpdateSfxGain();
     }
 
-    public void MuteAll(bool mute)
+    public float GetMusicVolume01() => _musicVolume;
+    public float GetSfxVolume01() => _sfxVolume;
+    public bool IsMusicEnabled() => _musicEnabled;
+    public bool IsSfxEnabled() => _sfxEnabled;
+
+    // ===== NEW: Play helpers với voice pool & cooldown =====
+    private void PlayVar(AudioClip clip, float vol = 1f)
     {
-        AudioListener.pause = mute;
-        AudioListener.volume = mute ? 0f : 1f;
-    }
+        if (!_sfxEnabled || clip == null || _sfxVoices == null || _sfxVoices.Length == 0) return;
 
-    // ================== Internals ==================
-
-    private void ApplyVolumes()
-    {
-        float musicVol = musicEnabled ? bgmVolume : 0f;
-        float sfxVol = sfxEnabled ? sfxVolume : 0f;
-
-        // Nếu dùng Mixer → set dB; nếu không → set trực tiếp
-        if (mixer)
+        // chống spam cùng clip quá dày
+        float now = Time.unscaledTime;
+        if (_lastPlayTime.TryGetValue(clip, out float last))
         {
-            mixer.SetFloat(bgmVolumeParam, LinearToDb(musicVol));
-            mixer.SetFloat(sfxVolumeParam, LinearToDb(sfxVol));
+            if ((now - last) * 1000f < sameClipCooldownMs) return;
         }
-        else
+        _lastPlayTime[clip] = now;
+
+        // round-robin voice
+        var src = _sfxVoices[_sfxVoiceCursor];
+        _sfxVoiceCursor = (_sfxVoiceCursor + 1) % _sfxVoices.Length;
+
+        float p = 1f + Random.Range(-pitchJitter, pitchJitter);
+        src.pitch = p;
+        src.PlayOneShot(clip, vol);
+        src.pitch = 1f;
+    }
+
+    public void PlayClick() => PlayVar(clickSfx, 0.9f);
+    public void PlayStartGame() => PlayVar(startGameSfx, 1f);
+    public void PlayPickup() => PlayVar(pickupSfx, 0.9f);     // NEW
+    public void PlayDrop() => PlayVar(dropSfx, 1.0f);       // NEW
+
+    public void PlayPraiseForLines(int linesCleared)
+    {
+        if (linesCleared < 2) return;
+        AudioClip praise = linesCleared switch
         {
-            if (bgmA) bgmA.volume = (bgmA.isPlaying ? musicVol : 0f);
-            if (bgmB) bgmB.volume = (bgmB.isPlaying ? musicVol : 0f);
-            // SFX volume áp khi phát, lưu lại master để nhân
-            _cachedSfxMaster = sfxVol;
-        }
+            2 => goodSfx,
+            3 => greatSfx,
+            4 => excellentSfx,
+            5 => fantasticSfx,
+            _ => legendarySfx
+        };
+        PlayVar(praise, 1f);
     }
 
-    private float LinearToDb(float v)
+    public void PlayUnbelievable() // NEW: bonus clear sạch bảng
     {
-        return (v <= 0.0001f) ? -80f : Mathf.Log10(v) * 20f;
+        PlayVar(unbelievableSfx, 1f);
     }
 
-    private AudioSource GetFreeSfxSource()
+    public void PlayBgm(AudioClip clip, bool loop = true)
     {
-        foreach (var s in _sfxPool)
-            if (!s.isPlaying) return s;
-
-        return _sfxPool.Count > 0 ? _sfxPool[0] : null; // fallback
+        if (!musicSource) return;
+        musicSource.loop = loop;
+        musicSource.clip = clip ? clip : defaultBgm;
+        EnsureBgmPlaying();
     }
-
-    private IEnumerator CrossfadeRoutine(AudioSource from, AudioSource to, float time)
+    public void PlayComboTier(int comboLevel)
     {
-        float t = 0f;
-        float fromStart = from ? from.volume : 0f;
-        float toStart = to ? to.volume : 0f;
+        if (!_sfxEnabled || clearComboSfxByTier == null || clearComboSfxByTier.Length == 0) return;
 
-        float target = musicEnabled ? bgmVolume : 0f;
-
-        while (t < time)
-        {
-            t += Time.unscaledDeltaTime;
-            float k = Mathf.Clamp01(t / time);
-            if (from) from.volume = Mathf.Lerp(fromStart, 0f, k);
-            if (to) to.volume = Mathf.Lerp(toStart, target, k);
-            yield return null;
-        }
-
-        if (from) { from.volume = 0f; from.Stop(); }
-        if (to) to.volume = target;
-        _xfadeRoutine = null;
+        int idx = Mathf.Clamp(comboLevel - 1, 0, clearComboSfxByTier.Length - 1);
+        var clip = clearComboSfxByTier[idx];
+        PlayVar(clip, 1f);
     }
 
-    private IEnumerator FadeOutAndStop(AudioSource src, float time)
-    {
-        float t = 0f;
-        float start = src.volume;
-        while (t < time)
-        {
-            t += Time.unscaledDeltaTime;
-            float k = Mathf.Clamp01(t / time);
-            src.volume = Mathf.Lerp(start, 0f, k);
-            yield return null;
-        }
-        src.Stop();
-        src.volume = 0f;
-    }
 }

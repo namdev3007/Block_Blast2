@@ -1,8 +1,9 @@
-﻿using System.Linq;
+﻿using System.Collections;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using System.Collections;
+using static UnityEditor.PlayerSettings;
 
 [RequireComponent(typeof(CanvasGroup))]
 public class ShapeDragItem : MonoBehaviour,
@@ -102,6 +103,8 @@ public class ShapeDragItem : MonoBehaviour,
 
         RectTransformUtility.ScreenPointToLocalPointInRectangle(
             dragRoot, eventData.position, _cam, out var startLocal);
+
+        AudioManager.Instance?.PlayPickup();
 
         // đặt ghost = vị trí con trỏ + grab + lift
         _ghostRT.anchoredPosition = startLocal + _grabOffsetLocal + _runtimeExtraOffset;
@@ -218,9 +221,11 @@ public class ShapeDragItem : MonoBehaviour,
             return;
         }
 
+        // Bù offset (grab + lift + anchorFix) cho raycast
         var screenPosWithOffset = eventData.position +
                                   LocalToScreenDelta(TotalLocalOffset + _anchorFixLocal);
 
+        // Snap về ô gần nhất nếu không raycast trúng
         if (!TryPickCellWithFallback(screenPosWithOffset, out var targetCell))
         {
             CleanupAfterDrop();
@@ -241,6 +246,8 @@ public class ShapeDragItem : MonoBehaviour,
         board.State.Place(_draggingData, anchorRow, anchorCol);
         board.PaintPlacedVariant(_draggingData, anchorRow, anchorCol, _variantIndex);
 
+        AudioManager.Instance?.PlayDrop();
+
         // 2) Clear lines
         int linesCleared = board.ResolveAndClearFullLinesAfterPlacementVariantAndGetCount(
             _draggingData, anchorRow, anchorCol, _variantIndex);
@@ -253,33 +260,34 @@ public class ShapeDragItem : MonoBehaviour,
             sr = board.score.OnPiecePlaced(blockCells, linesCleared);
         }
 
-        // 4) Popups (Combo -> Points & Praise đồng thời)
+        // === Chuẩn bị dữ liệu chung cho popup (dùng ở nhiều chỗ) ===
+        // Vị trí hiển thị (tâm cụm ô, fallback = vị trí chuột)
+        Vector2 pos;
+        if (!ComputePlacedCentroidScreen(_draggingData, anchorRow, anchorCol, _cam, out pos))
+            pos = eventData.position;
+
+        // Offsets combo & points (đẩy vào trong nếu chạm mép trái)
+        Vector2 comboOff = comboOffset;
+        Vector2 pointsOff = pointsOffset;
+        if (PlacementTouchesLeftEdge(_draggingData, anchorRow, anchorCol))
+        {
+            float pushIn = 200f;
+            comboOff.x = pushIn;
+            pointsOff.x += pushIn;
+        }
+
+        // Tính xem có hiện combo không
+        int comboThisTurn = Mathf.Max(1, sr.comboBefore);
+        bool willShowCombo = (Popup != null && linesCleared > 0 && comboThisTurn >= Popup.minComboToShow);
+
+        // 4) Popups (Combo -> Points & Praise)
         if (Popup != null && linesCleared > 0)
         {
-            // Vị trí hiển thị (tâm cụm ô, fallback = chuột)
-            Vector2 pos;
-            if (!ComputePlacedCentroidScreen(_draggingData, anchorRow, anchorCol, _cam, out pos))
-                pos = eventData.position;
-
-            // Offsets
-            Vector2 comboOff = comboOffset;
-            Vector2 pointsOff = pointsOffset;
-
-            if (PlacementTouchesLeftEdge(_draggingData, anchorRow, anchorCol))
-            {
-                float pushIn = 200f;
-                comboOff.x = pushIn;
-                pointsOff.x += pushIn;
-            }
-
-            int comboThisTurn = Mathf.Max(1, sr.comboBefore);
-            bool willShowCombo = comboThisTurn >= Popup.minComboToShow;
-
             // Combo (nếu đủ ngưỡng)
             if (willShowCombo)
                 Popup.ShowComboAtScreenPoint(comboThisTurn, pos, _cam, comboOff);
 
-            // Points & Praise: cùng lúc
+            // Points & Praise
             if (sr.linePointsFinal > 0)
             {
                 if (willShowCombo)
@@ -293,10 +301,29 @@ public class ShapeDragItem : MonoBehaviour,
             }
         }
 
+        // 4b) Thưởng clear toàn bảng (nếu có) — dùng lại pos/pointsOff/willShowCombo
+        if (board != null && board.IsBoardCompletelyEmpty())
+        {
+            // Cộng điểm bonus (nếu bạn có hàm này)
+            if (board.score != null)
+                board.score.AwardBoardClearBonus();
+
+            AudioManager.Instance?.PlayUnbelievable();
+
+            float delayForBonus = willShowCombo ? 0.8f : 0f;
+            if (Popup != null)
+            {
+                Popup.ShowUnbelievable(pos, _cam);
+                Vector2 bonusPointsOffset = pointsOff + new Vector2(0f, -18f);
+                Popup.ShowBoardClearBonus(pos, _cam, bonusPointsOffset, delayForBonus);
+            }
+        }
+
         // 5) Tiêu thụ slot & dọn
         palette.Consume(slotIndex);
         CleanupAfterDrop();
     }
+
 
     private IEnumerator ShowPointsAndPraiseLater(int points, int linesCleared, Vector2 pos, Camera cam, Vector2 offset, float delay)
     {
@@ -314,22 +341,6 @@ public class ShapeDragItem : MonoBehaviour,
                 Popup.ShowPraiseForLines(linesCleared, pos, cam);
         }
     }
-
-
-    private System.Collections.IEnumerator ShowPointsLater(int points, Vector2 pos, Camera cam, Vector2 offset, float delay)
-    {
-        float t = 0f;
-        while (t < delay)
-        {
-            t += Time.unscaledDeltaTime; // không phụ thuộc timeScale
-            yield return null;
-        }
-
-        if (Popup != null)
-            Popup.ShowPointsAtScreenPoint(points, pos, cam, offset);
-    }
-
-
 
     private bool TryPickCellWithFallback(Vector2 screenPos, out GridSquareView targetCell)
     {
@@ -350,15 +361,12 @@ public class ShapeDragItem : MonoBehaviour,
         _runtimeExtraOffset = Vector2.zero;
     }
 
-    // === Helpers ===
-
     private static void SetGraphicsRaycastTarget(GameObject root, bool value)
     {
         foreach (var g in root.GetComponentsInChildren<Graphic>(true))
             g.raycastTarget = value;
     }
 
-    // Tính tâm cụm ô vừa đặt -> ScreenPoint (GetFilledCells() trả Vector2Int)
     private bool ComputePlacedCentroidScreen(ShapeData s, int anchorRow, int anchorCol, Camera cam, out Vector2 screen)
     {
         screen = default;
@@ -384,7 +392,6 @@ public class ShapeDragItem : MonoBehaviour,
         return true;
     }
 
-    // Có ô nào chạm cột ngoài cùng bên trái?
     private bool PlacementTouchesLeftEdge(ShapeData s, int anchorRow, int anchorCol)
     {
         if (s == null) return false;

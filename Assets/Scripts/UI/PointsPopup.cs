@@ -28,11 +28,6 @@ public class PointsPopup : MonoBehaviour
         _cg = gameObject.GetComponent<CanvasGroup>();
         if (_cg == null) _cg = gameObject.AddComponent<CanvasGroup>();
     }
-
-    /// <summary>
-    /// Hiện "+points" tại screenPoint. Sau phần appear (delay -> pop/rise),
-    /// nếu flyTarget != null thì bay về flyTarget.
-    /// </summary>
     public void ShowAtScreenPoint(
         int points,
         Vector2 screenPoint,
@@ -115,8 +110,6 @@ public class PointsPopup : MonoBehaviour
             yield break;
         }
 
-        // Có target: bay về điểm tổng
-        // Tính local đích trong cùng 'parent'
         Vector2 flyDestLocal = _rt.anchoredPosition; // default fallback
         {
             // lấy tâm target theo screen -> local parent

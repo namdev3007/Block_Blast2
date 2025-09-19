@@ -13,7 +13,7 @@ public class BoardRuntime : MonoBehaviour
     public float clearFade = 0.15f;
 
     [Header("Scoring")]
-    public GameScore score;   // gán trong Inspector
+    public GameScore score;   // optional
 
     public BoardState State { get; private set; }
 
@@ -22,6 +22,7 @@ public class BoardRuntime : MonoBehaviour
 
     // ===== Seed cấu hình =====
     [Header("Initial Seed")]
+    [Tooltip("Nếu TRUE và autoPlayIntroWaveOnStart bật, sẽ seed & chạy wave ngay ở Start(). Còn mặc định: để GameManager gọi khi nhấn Start.")]
     public bool seedAtStart = true;
     [Min(0)] public int initialMinOccupied = 35;
     [Min(0)] public int initialMaxOccupied = 45;
@@ -31,22 +32,23 @@ public class BoardRuntime : MonoBehaviour
     [Header("Spawn Colors")]
     [Range(2, 5)] public int minSpawnColors = 2;
     [Range(2, 5)] public int maxSpawnColors = 3;
-
     [Tooltip("Xác suất chọn cùng màu với láng giềng đã có (0..1).")]
     [Range(0f, 1f)] public float neighborSameColorBias = 0.7f;
-
     [Tooltip("Tần số Perlin noise. Nhỏ -> mảng màu liền mạch hơn.")]
     [Range(0.05f, 0.6f)] public float noiseScale = 0.22f;
-
     [Tooltip("Tổng số biến thể skin mà SkinProvider hỗ trợ (điền đúng theo SkinProvider).")]
     public int totalSkinVariants = 6;
 
     // ===== Intro waves config =====
     [Header("Intro Waves")]
+    [Tooltip("Chạy wave tự động ở Start() (tuỳ chọn). TẮT để chỉ chạy khi GameManager.StartNewGame().")]
+    public bool autoPlayIntroWaveOnStart = false;
     [Tooltip("Khoảng delay giữa các hàng cho sóng (giây).")]
     [Range(0.01f, 0.12f)] public float waveRowStep = 0.04f;
     [Tooltip("Jitter nhỏ giữa các cột (giây).")]
     [Range(0f, 0.05f)] public float waveColJitter = 0.01f;
+
+    Coroutine _introCR;
 
     private void Awake()
     {
@@ -58,11 +60,14 @@ public class BoardRuntime : MonoBehaviour
     {
         EnsureGridBuilt();
 
-        if (seedAtStart)
-            SeedRandomOccupied(initialMinOccupied, initialMaxOccupied, avoidFullRowsCols);
+        // Mặc định KHÔNG làm gì ở đây. Chỉ khi bạn bật autoPlayIntroWaveOnStart mới seed + chạy wave.
+        if (autoPlayIntroWaveOnStart)
+        {
+            if (seedAtStart)
+                SeedRandomOccupied(initialMinOccupied, initialMaxOccupied, avoidFullRowsCols);
 
-        // Chạy intro waves ngay sau seed
-        StartCoroutine(PlayIntroWavesForEmpties());
+            PlayIntroWave(); // dùng config hiện tại
+        }
     }
 
     private void EnsureGridBuilt()
@@ -70,9 +75,7 @@ public class BoardRuntime : MonoBehaviour
         if (gridView == null) return;
         int expected = gridView.columns * gridView.rows;
         if (gridView.Cells == null || gridView.Cells.Count != expected)
-        {
             gridView.Build();
-        }
     }
 
     private Sprite SpriteFromVariant(int variantIndex)
@@ -81,7 +84,25 @@ public class BoardRuntime : MonoBehaviour
         return s != null ? s : placedSpriteFallback;
     }
 
-    // ===== PREVIEW footprint (giữ nguyên) =====
+    // ======== Public API cho GameManager ========
+
+    /// <summary>Reset board & seed theo tham số (gọi khi bắt đầu ván mới).</summary>
+    public void ResetAndSeed(int min, int max, bool avoidFull)
+    {
+        EnsureGridBuilt();
+        SeedRandomOccupied(min, max, avoidFull);
+    }
+
+    /// <summary>Chạy intro wave cho những ô trống hiện tại (gọi sau khi seed).</summary>
+    public void PlayIntroWave(float? rowStepOverride = null, float? colJitterOverride = null)
+    {
+        if (_introCR != null) StopCoroutine(_introCR);
+        _introCR = StartCoroutine(PlayIntroWavesForEmpties(
+            rowStepOverride ?? waveRowStep,
+            colJitterOverride ?? waveColJitter));
+    }
+
+    // ===== PREVIEW footprint =====
     public void ShowPreviewVariant(ShapeData shape, int anchorRow, int anchorCol, int variantIndex)
     {
         ClearFootprintPreview();
@@ -180,7 +201,7 @@ public class BoardRuntime : MonoBehaviour
         _linePreviewIdx.Clear();
     }
 
-    // ===== Đặt thật (giữ nguyên) =====
+    // ===== Đặt thật =====
     public void PaintPlacedVariant(ShapeData shape, int anchorRow, int anchorCol, int variantIndex)
     {
         var sprite = SpriteFromVariant(variantIndex);
@@ -228,10 +249,7 @@ public class BoardRuntime : MonoBehaviour
 
         var sprite = SpriteFromVariant(variantIndex);
         foreach (var idx in toClearIdx)
-        {
-            var view = gridView.Cells[idx];
-            view.SetOccupied(true, sprite);
-        }
+            gridView.Cells[idx].SetOccupied(true, sprite);
 
         State.ClearLines(fullRows, fullCols);
 
@@ -257,8 +275,8 @@ public class BoardRuntime : MonoBehaviour
         _ = ResolveAndClearFullLinesAfterPlacementVariantAndGetCount(shape, anchorRow, anchorCol, variantIndex);
     }
 
-    // ====== INTRO WAVES ======
-    private IEnumerator PlayIntroWavesForEmpties()
+    // ====== INTRO WAVES (private) ======
+    private IEnumerator PlayIntroWavesForEmpties(float rowStep, float colJitter)
     {
         if (gridView == null || gridView.Cells == null) yield break;
 
@@ -268,15 +286,11 @@ public class BoardRuntime : MonoBehaviour
         // Thu list ô trống sau khi seed
         var empty = new List<(int idx, int r, int c)>();
         for (int r = 0; r < H; r++)
-        {
             for (int c = 0; c < W; c++)
-            {
                 if (!State.IsOccupied(r, c))
                     empty.Add((r * W + c, r, c));
-            }
-        }
 
-        // Chuẩn bị sprite từ SkinProvider cho từng ô trống (giữ nhất quán cả 3 wave)
+        // Sprite wave theo ô (ổn định giữa các wave)
         var waveSprite = new Dictionary<int, Sprite>(empty.Count);
         foreach (var e in empty)
         {
@@ -285,24 +299,24 @@ public class BoardRuntime : MonoBehaviour
             waveSprite[e.idx] = sprite;
         }
 
-        // --- Wave 1: từ dưới lên (flash bằng sprite)
+        // Wave 1: từ dưới lên (đổ màu)
         foreach (var e in empty)
         {
-            float delay = (H - 1 - e.r) * waveRowStep + Random.Range(0f, waveColJitter);
-            gridView.Cells[e.idx].PlayIntroFlashWithSprite(waveSprite[e.idx], delay, 0.10f, 0.18f, 1f);
+            float delay = (H - 1 - e.r) * rowStep + Random.Range(0f, colJitter);
+            gridView.Cells[e.idx].PlayIntroColorPour(waveSprite[e.idx], delay, 0.12f, 0.04f, 0.22f);
         }
-        float total1 = H * waveRowStep + 0.30f;
+        float total1 = H * rowStep + 0.30f;
         yield return new WaitForSeconds(total1);
 
-        // --- Wave 2: từ trên xuống (flash bằng sprite)
+        // Wave 2: từ trên xuống (đổ màu nhẹ hơn)
         foreach (var e in empty)
         {
-            float delay = (e.r) * waveRowStep + Random.Range(0f, waveColJitter);
-            gridView.Cells[e.idx].PlayIntroFlashWithSprite(waveSprite[e.idx], delay, 0.10f, 0.18f, 0.9f);
+            float delay = (e.r) * rowStep + Random.Range(0f, colJitter);
+            gridView.Cells[e.idx].PlayIntroColorPour(waveSprite[e.idx], delay, 0.10f, 0.03f, 0.20f);
         }
     }
 
-    // ====== (giữ nguyên) – Seed ngẫu nhiên 35–45 ô với 2–3 màu “gần nhau” ======
+    // ====== Seed helper ======
     public void SeedRandomOccupied(int minCount, int maxCount, bool avoidFullLines)
     {
         if (gridView == null || gridView.Cells == null || gridView.Cells.Count == 0) return;
@@ -367,12 +381,10 @@ public class BoardRuntime : MonoBehaviour
         }
 
         int placed = 0;
-        int safety = W * H * 3;
 
         foreach (var (r, c) in all)
         {
             if (placed >= target) break;
-            if (safety-- <= 0) break;
 
             if (avoidFullLines)
             {
@@ -391,6 +403,7 @@ public class BoardRuntime : MonoBehaviour
             rowCount[r]++; colCount[c]++; placed++;
         }
 
+        // Fallback nếu chưa đủ target
         if (placed < target)
         {
             foreach (var (r, c) in all)
@@ -410,6 +423,16 @@ public class BoardRuntime : MonoBehaviour
             }
         }
     }
+
+    public bool IsBoardCompletelyEmpty()
+    {
+        int W = gridView.columns, H = gridView.rows;
+        for (int r = 0; r < H; r++)
+            for (int c = 0; c < W; c++)
+                if (State.IsOccupied(r, c)) return false;
+        return true;
+    }
+
 
     private List<int> PickDistinctVariants(int k)
     {

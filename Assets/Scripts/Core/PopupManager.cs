@@ -25,9 +25,17 @@ public class PopupManager : MonoBehaviour
     [Tooltip("Chỉ hiện khi ăn >= 2 lines.")]
     public int minLinesForPraise = 2;
 
+    // ===== Board Clear Bonus =====
+    [Header("Board Clear Bonus")]
+    public int boardClearBonus = 240;
+    public string unbelievableText = "Unbelievable!";
+    public Vector2 unbelievableOffset = new Vector2(0f, 96f);
+
     public void ShowComboAtScreenPoint(int combo, Vector2 screenPoint, Camera cam, Vector2 offset)
     {
         if (combo < minComboToShow || root == null || comboPopupPrefab == null) return;
+
+        // TẠM THỜI BỎ QUA clearComboSfxByTier -> không phát SFX combo theo tier
 
         var p = Instantiate(comboPopupPrefab);
         string rich = $"<color=#FFFFFF>Combo</color> <color=#FFC107>{combo}</color>";
@@ -46,6 +54,7 @@ public class PopupManager : MonoBehaviour
             delayOverride ?? defaultPointsDelay,
             flyTarget, totalScoreOffset
         );
+        // (Không phát SFX ở điểm vì yêu cầu chỉ “sau khi đạt điều kiện” praise/board clear)
     }
 
     public void ShowComboThenPoints(
@@ -58,7 +67,7 @@ public class PopupManager : MonoBehaviour
         ShowPointsAtScreenPoint(points, screenPoint, cam, pointsOffset, pointsDelayOverride);
     }
 
-    // ===== NEW: Praise =====
+    // ===== Praise (theo số line) =====
     public void ShowPraiseForLines(int linesCleared, Vector2 screenPoint, Camera cam)
     {
         if (root == null || praisePopupPrefab == null) return;
@@ -75,5 +84,29 @@ public class PopupManager : MonoBehaviour
 
         var p = Instantiate(praisePopupPrefab);
         p.ShowAtScreenPoint(msg, screenPoint, cam, root, praiseOffset);
+
+        // AUDIO: phát SFX praise theo số line
+        AudioManager.Instance?.PlayPraiseForLines(linesCleared);
+    }
+
+    // ===== Board Clear =====
+    public void ShowUnbelievable(Vector2 screenPoint, Camera cam)
+    {
+        if (root == null || praisePopupPrefab == null) return;
+
+        var p = Instantiate(praisePopupPrefab);
+        p.ShowAtScreenPoint(unbelievableText, screenPoint, cam, root, unbelievableOffset);
+
+        //// AUDIO: phát SFX unbelievable
+        //AudioManager.Instance?.PlayUnbelievable();
+    }
+
+    public void ShowBoardClearBonus(Vector2 screenPoint, Camera cam, Vector2 pointsOffset, float? delayOverride = null)
+    {
+        // Hiện chữ + SFX trước
+        ShowUnbelievable(screenPoint, cam);
+
+        // Sau đó hiện điểm thưởng (có thể delay nhẹ nếu muốn)
+        ShowPointsAtScreenPoint(boardClearBonus, screenPoint, cam, pointsOffset, delayOverride);
     }
 }
