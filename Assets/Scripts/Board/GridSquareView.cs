@@ -1,6 +1,8 @@
 ﻿using UnityEngine;
 using UnityEngine.UI;
 using DG.Tweening; // DOTween cho flash viền
+using System.Collections;
+using System.Collections.Generic;
 
 public class GridSquareView : MonoBehaviour
 {
@@ -40,7 +42,7 @@ public class GridSquareView : MonoBehaviour
     private Vector3 _initialScale;
     private Tween _clearTween;
 
-    // NEW: tween cho intro
+    // NEW: tween cho intro/ghost
     private Tween _introTween;
 
     Sequence _seq;
@@ -88,7 +90,7 @@ public class GridSquareView : MonoBehaviour
             hoverPreviewImage.raycastTarget = false;
         }
 
-        // reset intro overlay
+        // reset intro/ghost overlay
         if (introWaveImage)
         {
             var cc = introWaveImage.color; cc.a = 0f;
@@ -243,7 +245,10 @@ public class GridSquareView : MonoBehaviour
         normalImage.sprite = s != null ? s : defaultSprite;
     }
 
-    public void ResetCell()
+    /// <summary>
+    /// Reset cell. Nếu muốn giữ ghost sau game over, truyền resetGhost = false.
+    /// </summary>
+    public void ResetCell(bool resetGhost = true)
     {
         _glowTween?.Kill();
         if (_glow != null)
@@ -265,8 +270,8 @@ public class GridSquareView : MonoBehaviour
         if (hoverImage != null) hoverImage.enabled = false;
         if (hoverPreviewImage != null) hoverPreviewImage.enabled = false;
 
-        // reset intro layer
-        if (introWaveImage)
+        // reset intro/ghost layer (nếu được yêu cầu)
+        if (introWaveImage && resetGhost)
         {
             _introTween?.Kill();
             var cc = introWaveImage.color; cc.a = 0f;
@@ -274,6 +279,9 @@ public class GridSquareView : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Clear + pop (đặt thật) rồi reset cell.
+    /// </summary>
     public void PlayClearPopAndReset(
         float delay = 0f,
         float popScale = 1.15f,
@@ -285,7 +293,7 @@ public class GridSquareView : MonoBehaviour
     {
         if (activeImage == null || !activeImage.enabled)
         {
-            ResetCell();
+            ResetCell(true);
             return;
         }
 
@@ -304,12 +312,15 @@ public class GridSquareView : MonoBehaviour
             {
                 var c2 = activeImage.color; c2.a = 1f; activeImage.color = c2;
                 _rt.localScale = _initialScale;
-                ResetCell();
+                ResetCell(true);
             })
             .SetTarget(this);
     }
 
-    public void PlayClearPopAndReset(
+    /// <summary>
+    /// Bản bounce đơn giản (đổi tên để tránh trùng overload mơ hồ).
+    /// </summary>
+    public void PlayClearPopBounce(
         float scaleUp = 1.2f, float upTime = 0.12f,
         float downTime = 0.10f, Ease upEase = Ease.OutBack, Ease downEase = Ease.InSine)
     {
@@ -378,17 +389,11 @@ public class GridSquareView : MonoBehaviour
             .SetTarget(this);
     }
 
-    /// <summary>
-    /// Flash intro cũ – giờ chuyển hướng sang dùng sprite (mặc định là defaultSprite).
-    /// </summary>
     public void PlayIntroFlash(float delay, float fadeIn = 0.10f, float fadeOut = 0.20f, float maxAlpha = 0.8f)
     {
         PlayIntroFlashWithSprite(defaultSprite, delay, fadeIn, fadeOut, maxAlpha);
     }
 
-    /// <summary>
-    /// "Đổ màu" – hiện sprite (skin) rồi fade đi. Không thay đổi Occupied.
-    /// </summary>
     public void PlayIntroColorPour(Sprite skinSprite, float delay, float fadeIn = 0.14f, float hold = 0.05f, float fadeOut = 0.28f)
     {
         if (!introWaveImage) return;
@@ -407,6 +412,72 @@ public class GridSquareView : MonoBehaviour
             .Append(introWaveImage.DOFade(1f, fadeIn))
             .AppendInterval(Mathf.Max(0f, hold))
             .Append(introWaveImage.DOFade(0f, fadeOut))
+            .SetTarget(this);
+    }
+
+    public Sprite CurrentSprite
+    {
+        get
+        {
+            if (activeImage != null && activeImage.enabled && activeImage.sprite != null)
+                return activeImage.sprite;
+            if (normalImage != null && normalImage.sprite != null)
+                return normalImage.sprite;
+            return defaultSprite;
+        }
+    }
+
+    // === GHOST OVERLAY (giữ nguyên sau wave) ===
+    public void ShowIntroGhost(Sprite s, float alpha = 0.85f)
+    {
+        if (!introWaveImage) return;
+        _introTween?.Kill();
+
+        introWaveImage.sprite = s != null ? s : defaultSprite;
+        introWaveImage.preserveAspect = true;
+
+        var c = introWaveImage.color;
+        c.a = alpha;
+        introWaveImage.color = c;
+        introWaveImage.enabled = true;
+    }
+
+    public void HideIntroGhost(bool instant = false, float fadeOut = 0.15f)
+    {
+        if (!introWaveImage) return;
+        _introTween?.Kill();
+
+        if (instant || fadeOut <= 0f)
+        {
+            var c = introWaveImage.color; c.a = 0f;
+            introWaveImage.color = c;
+            introWaveImage.enabled = false;
+            return;
+        }
+
+        _introTween = introWaveImage.DOFade(0f, fadeOut)
+            .OnComplete(() => introWaveImage.enabled = false)
+            .SetTarget(this);
+    }
+
+    public void PlayGameOverGhost(Sprite s, float delay, float fadeIn = 0.12f, float targetAlpha = 0.85f)
+    {
+        if (!introWaveImage) return;
+
+        _introTween?.Kill();
+
+        introWaveImage.sprite = s != null ? s : defaultSprite;
+        introWaveImage.preserveAspect = true;
+
+        var c0 = introWaveImage.color; c0.a = 0f;
+        introWaveImage.color = c0;
+        introWaveImage.enabled = true;
+
+        float a = Mathf.Clamp01(targetAlpha);
+
+        _introTween = DOTween.Sequence()
+            .AppendInterval(Mathf.Max(0f, delay))
+            .Append(introWaveImage.DOFade(a, fadeIn))
             .SetTarget(this);
     }
 }

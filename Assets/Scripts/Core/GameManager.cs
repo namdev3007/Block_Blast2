@@ -13,19 +13,32 @@ public class GameManager : MonoBehaviour
     public GameScore score;
     public PopupManager popup;   // optional
     public UIManager ui;         // gán trong Scene
+    public RevivePanel revivePanel; // <-- kéo script RevivePanel vào đây trong Inspector
 
     [Header("Options")]
     public bool autoStartOnAwake = false;   // để FALSE: vào Home trước
+    public float reviveCountdownSeconds = 5f;
 
     public GameState State { get; private set; } = GameState.Boot;
 
     public event Action<GameState> GameStateChanged;
+    public event Action GameStateWillChange;
     public event Action GameStarted;
+
+    // revive guard
+    private bool reviveUsed = false;
 
     void Awake()
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
+
+        if (revivePanel != null)
+        {
+            revivePanel.Accepted += OnReviveAccepted;
+            revivePanel.TimedOut += OnReviveTimedOut;
+            revivePanel.gameObject.SetActive(false);
+        }
     }
 
     void Start()
@@ -38,10 +51,13 @@ public class GameManager : MonoBehaviour
     public void GoHome()
     {
         Time.timeScale = 1f;
-        SetState(GameState.Boot);      // dùng Boot như trạng thái Home
+        reviveUsed = false;
+        SetState(GameState.Boot);
         ui?.ShowHome(true);
         ui?.ShowHUD(false);
         ui?.ShowSettingPanel(false);
+        ui?.ShowRevive(false);
+        ui?.ShowGameOver(false);
     }
 
     // Gán hàm này vào nút Start ở màn hình Home
@@ -54,20 +70,20 @@ public class GameManager : MonoBehaviour
     // ====== GAME FLOW ======
     public void StartNewGame(int? seed = null)
     {
+        // Reset revive
+        reviveUsed = false;
+
         // Reset score
         if (score != null) score.ResetAll();
 
         // Reset board + seed
         if (board != null)
         {
-            // xoá sạch
             board.SeedRandomOccupied(0, 0, true);
-            // seed ban đầu nếu muốn
             if (board.seedAtStart)
                 board.ResetAndSeed(board.initialMinOccupied, board.initialMaxOccupied, board.avoidFullRowsCols);
 
-            // >>> Chỉ chạy wave sau khi bấm Start <<<
-            board.PlayIntroWave(); // dùng config bên BoardRuntime
+            board.PlayIntroWave();
         }
 
         // Refill hand
@@ -81,6 +97,8 @@ public class GameManager : MonoBehaviour
         ui?.ShowHome(false);
         ui?.ShowHUD(true);
         ui?.ShowSettingPanel(false);
+        ui?.ShowRevive(false);
+        ui?.ShowGameOver(false);
     }
 
     public void Pause()
@@ -106,8 +124,68 @@ public class GameManager : MonoBehaviour
     private void SetState(GameState s)
     {
         if (State == s) return;
+        GameStateWillChange?.Invoke();
         State = s;
         GameStateChanged?.Invoke(State);
         ui?.OnGameStateChanged(State);
+    }
+
+    public void OnNoMovesLeft()
+    {
+        if (reviveUsed) { Debug.Log("[GM] Revive already used"); GoGameOver(); return; }
+        if (revivePanel == null) { Debug.LogWarning("[GM] revivePanel NULL"); GoGameOver(); return; }
+        if (ui == null) { Debug.LogWarning("[GM] ui NULL"); GoGameOver(); return; }
+
+        Time.timeScale = 0f;
+        ui.ShowHUD(false);
+        ui.ShowRevive(true);
+        revivePanel.transform.SetAsLastSibling();
+        revivePanel.Show(reviveCountdownSeconds);
+    }
+
+
+    // ====== REVIVE HANDLERS ======
+    private void OnReviveAccepted()
+    {
+        // chỉ được 1 lần trong cả ván
+        reviveUsed = true;
+
+        // Ẩn revive
+        ui?.ShowRevive(false);
+        revivePanel?.Hide();
+
+        // Xoá ghost
+        board?.ClearGameOverGhosts(instant: false, fadeOut: 0.2f);
+
+        // Refill 3 block mới (giả định Refill sẽ lấp các slot trống tới 3)
+        palette?.Refill();
+
+        // Trở lại Playing
+        Time.timeScale = 1f;
+        SetState(GameState.Playing);
+        ui?.ShowHUD(true);
+
+        AudioManager.Instance?.PlayStartGame(); // nếu có SFX revive/start
+    }
+
+    private void OnReviveTimedOut()
+    {
+        // Hết giờ không bấm -> GameOver
+        ui?.ShowRevive(false);
+        revivePanel?.Hide();
+        GoGameOver();
+    }
+
+    // ====== GAME OVER ======
+    private void GoGameOver()
+    {
+        // đảm bảo dọn revive UI nếu đang mở
+        revivePanel?.Hide();
+        ui?.ShowRevive(false);
+
+        Time.timeScale = 1f; // tuỳ bạn muốn giữ 0f hay 1f ở màn GameOver UI
+        SetState(GameState.GameOver);
+
+        ui?.ShowGameOver(true);
     }
 }

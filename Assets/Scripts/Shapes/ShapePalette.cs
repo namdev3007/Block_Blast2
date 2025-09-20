@@ -24,6 +24,7 @@ public class ShapePalette : MonoBehaviour
     // runtime
     private readonly List<ShapeData> _current = new();
     private readonly Queue<ShapeData> _history = new();
+    private readonly HashSet<ShapeData> _historySet = new(); // NEW: O(1) check
     private readonly List<int> _slotVariants = new();
 
     private System.Random _rng;
@@ -43,6 +44,9 @@ public class ShapePalette : MonoBehaviour
     private int _nextSuddenAtMove = -1;
 
     public bool IsSuddenActive => _sudden != null && _sudden.active;
+
+    private float RngValue() => (float)_rng.NextDouble();
+    private int RngRange(int minInclusive, int maxExclusive) => _rng.Next(minInclusive, maxExclusive);
 
     private void Awake()
     {
@@ -65,7 +69,7 @@ public class ShapePalette : MonoBehaviour
         // 1) High-line priority (6 → 5) → 2) Sudden Death → 3) Normal bag/hand
         List<ShapeData> hand = null;
 
-        float r = UnityEngine.Random.value;
+        float r = RngValue();
         if (r < config.highLine6Chance)
         {
             hand = TryBuildHighLineHandOrBag(slots.Count, minLines: 6);
@@ -109,14 +113,14 @@ public class ShapePalette : MonoBehaviour
                 hand = BuildHandSmart(slots.Count);
 
                 if (!config.useTripletBag && config.enableHoleFiller &&
-                    (UnityEngine.Random.value < config.holeFillerChance) &&
+                    (RngValue() < config.holeFillerChance) &&
                     board != null && board.State != null)
                 {
                     var holeFits = CollectHoleFillerShapes(board.State, config.holeFillerMaxCells, config.holeFitterSampleShapes);
                     if (holeFits.Count > 0)
                     {
-                        int slotPick = _rng.Next(Mathf.Min(slots.Count, hand.Count));
-                        hand[slotPick] = holeFits[_rng.Next(holeFits.Count)];
+                        int slotPick = RngRange(0, Mathf.Min(slots.Count, hand.Count));
+                        hand[slotPick] = holeFits[RngRange(0, holeFits.Count)];
                     }
                 }
             }
@@ -145,7 +149,6 @@ public class ShapePalette : MonoBehaviour
         _refillsSinceSudden++;
     }
 
-
     public void OnAllUsed() => Refill();
 
     public ShapeData Peek(int slotIndex)
@@ -165,11 +168,17 @@ public class ShapePalette : MonoBehaviour
         if (slotIndex < 0 || slotIndex >= _current.Count) return;
         if (_current[slotIndex] == null) return;
 
-        _history.Enqueue(_current[slotIndex]);
-        while (_history.Count > historyKeep) _history.Dequeue();
+        var consumed = _current[slotIndex];
+        _history.Enqueue(consumed);
+        _historySet.Add(consumed);
+        while (_history.Count > historyKeep)
+        {
+            var removed = _history.Dequeue();
+            _historySet.Remove(removed);
+        }
 
         // Sudden: bỏ khối vừa dùng khỏi remaining
-        if (IsSuddenActive) _sudden.remaining.Remove(_current[slotIndex]);
+        if (IsSuddenActive) _sudden.remaining.Remove(consumed);
 
         _current[slotIndex] = null;
         if (slotIndex < _slotVariants.Count) _slotVariants[slotIndex] = 0;
@@ -255,7 +264,7 @@ public class ShapePalette : MonoBehaviour
 
             for (int i = 0; i < count; i++)
             {
-                bool forceLine = _rng.NextDouble() < config.forceLineClearChance;
+                bool forceLine = RngValue() < config.forceLineClearChance;
                 bool mustBePlaceable = (placeableSlots < config.requiredPlaceableSlots);
 
                 var pick = PickOneShapeSmart(state, hand, weights, forceLine, mustBePlaceable);
@@ -303,7 +312,7 @@ public class ShapePalette : MonoBehaviour
         // Optional: hole-filler injection
         List<ShapeData> holeFits = null;
         bool tryHoleFiller = config.enableHoleFiller && config.holeFillerAffectsBag &&
-                             (UnityEngine.Random.value < config.holeFillerChance);
+                             (RngValue() < config.holeFillerChance);
         if (tryHoleFiller)
         {
             holeFits = CollectHoleFillerShapes(state, config.holeFillerMaxCells, config.holeFitterSampleShapes);
@@ -315,23 +324,23 @@ public class ShapePalette : MonoBehaviour
             trials++;
 
             ShapeData s1, s2, s3;
-            if (holeFits != null && holeFits.Count > 0 && _rng.Next(3) == 0)
+            if (holeFits != null && holeFits.Count > 0 && RngRange(0, 3) == 0)
             {
-                s1 = holeFits[_rng.Next(holeFits.Count)];
+                s1 = holeFits[RngRange(0, holeFits.Count)];
                 s2 = PickOneShapeSmart(state, new List<ShapeData> { s1 }, weights, false, false);
                 s3 = PickOneShapeSmart(state, new List<ShapeData> { s1, s2 }, weights, false, false);
             }
-            else if (holeFits != null && holeFits.Count > 0 && _rng.Next(2) == 0)
+            else if (holeFits != null && holeFits.Count > 0 && RngRange(0, 2) == 0)
             {
                 s1 = PickOneShapeSmart(state, new List<ShapeData>(), weights, false, false);
-                s2 = holeFits[_rng.Next(holeFits.Count)];
+                s2 = holeFits[RngRange(0, holeFits.Count)];
                 s3 = PickOneShapeSmart(state, new List<ShapeData> { s1, s2 }, weights, false, false);
             }
             else if (holeFits != null && holeFits.Count > 0)
             {
                 s1 = PickOneShapeSmart(state, new List<ShapeData>(), weights, false, false);
                 s2 = PickOneShapeSmart(state, new List<ShapeData> { s1 }, weights, false, false);
-                s3 = holeFits[_rng.Next(holeFits.Count)];
+                s3 = holeFits[RngRange(0, holeFits.Count)];
             }
             else
             {
@@ -351,7 +360,7 @@ public class ShapePalette : MonoBehaviour
 
         if (candidates.Count == 0) return BuildHandSmart(needed);
 
-        var pick = candidates[_rng.Next(candidates.Count)];
+        var pick = candidates[RngRange(0, candidates.Count)];
         var hand = new List<ShapeData>(needed);
         hand.Add(pick.a);
         if (needed > 1) hand.Add(pick.b);
@@ -421,46 +430,57 @@ public class ShapePalette : MonoBehaviour
         return false;
     }
 
-    // ---------- Snapshot simulator ----------
+    // ---------- Snapshot simulator (OPTIMIZED) ----------
     private sealed class BoardSnapshot
     {
         public readonly int W, H;
         private readonly bool[] occ;
+        private readonly int[] rowCnt; // số ô đã chiếm theo hàng
+        private readonly int[] colCnt; // số ô đã chiếm theo cột
 
         public BoardSnapshot(BoardState st)
         {
             W = st.Width; H = st.Height;
             occ = new bool[W * H];
+            rowCnt = new int[H];
+            colCnt = new int[W];
+
             for (int r = 0; r < H; r++)
                 for (int c = 0; c < W; c++)
-                    occ[r * W + c] = st.IsOccupied(r, c);
+                {
+                    bool o = st.IsOccupied(r, c);
+                    occ[r * W + c] = o;
+                    if (o) { rowCnt[r]++; colCnt[c]++; }
+                }
         }
 
-        private BoardSnapshot(int W, int H, bool[] occ)
+        private BoardSnapshot(int W, int H, bool[] occ, int[] rowCnt, int[] colCnt)
         {
-            this.W = W; this.H = H; this.occ = occ;
+            this.W = W; this.H = H;
+            this.occ = occ;
+            this.rowCnt = rowCnt;
+            this.colCnt = colCnt;
         }
 
         public BoardSnapshot Clone()
         {
-            var copy = new bool[occ.Length];
-            Array.Copy(occ, copy, occ.Length);
-            return new BoardSnapshot(W, H, copy);
+            var occ2 = new bool[occ.Length];
+            Array.Copy(occ, occ2, occ.Length);
+            var r2 = new int[rowCnt.Length];
+            var c2 = new int[colCnt.Length];
+            Array.Copy(rowCnt, r2, rowCnt.Length);
+            Array.Copy(colCnt, c2, colCnt.Length);
+            return new BoardSnapshot(W, H, occ2, r2, c2);
         }
 
         public bool IsInside(int r, int c) => (r >= 0 && r < H && c >= 0 && c < W);
 
         public bool CanPlace(ShapeData s, int anchorR, int anchorC)
         {
-            var b = s.GetBounds();
-            if (b.maxR < b.minR) return false;
-
             foreach (var cell in s.GetFilledCells())
             {
-                int r = anchorR + cell.x;
-                int c = anchorC + cell.y;
-                if (!IsInside(r, c)) return false;
-                if (occ[r * W + c]) return false;
+                int r = anchorR + cell.x, c = anchorC + cell.y;
+                if (!IsInside(r, c) || occ[r * W + c]) return false;
             }
             return true;
         }
@@ -469,9 +489,12 @@ public class ShapePalette : MonoBehaviour
         {
             foreach (var cell in s.GetFilledCells())
             {
-                int r = anchorR + cell.x;
-                int c = anchorC + cell.y;
-                occ[r * W + c] = true;
+                int r = anchorR + cell.x, c = anchorC + cell.y, idx = r * W + c;
+                if (!occ[idx])
+                {
+                    occ[idx] = true;
+                    rowCnt[r]++; colCnt[c]++;
+                }
             }
         }
 
@@ -490,75 +513,33 @@ public class ShapePalette : MonoBehaviour
 
         public int CountLinesCompletedIfPlaced(ShapeData s, int anchorR, int anchorC)
         {
-            var tmp = new bool[occ.Length];
-            Array.Copy(occ, tmp, occ.Length);
-
-            foreach (var cell in s.GetFilledCells())
-            {
-                int r = anchorR + cell.x;
-                int c = anchorC + cell.y;
-                if (IsInside(r, c)) tmp[r * W + c] = true;
-            }
-
+            var next = Clone();
+            next.Place(s, anchorR, anchorC);
             int clears = 0;
-            // rows
-            for (int r = 0; r < H; r++)
-            {
-                bool full = true;
-                for (int c = 0; c < W; c++)
-                    if (!tmp[r * W + c]) { full = false; break; }
-                if (full) clears++;
-            }
-            // cols
-            for (int c = 0; c < W; c++)
-            {
-                bool full = true;
-                for (int r = 0; r < H; r++)
-                    if (!tmp[r * W + c]) { full = false; break; }
-                if (full) clears++;
-            }
+            for (int r = 0; r < H; r++) if (next.rowCnt[r] == W) clears++;
+            for (int c = 0; c < W; c++) if (next.colCnt[c] == H) clears++;
             return clears;
         }
 
         public int CountNearFullLinesIfPlaced(ShapeData s, int anchorR, int anchorC, int missing = 1)
         {
-            var tmp = new int[W * H];
-            // build counts: we only need per-row/per-col, but quick heuristic:
-
-            // copy occ to bool
-            var bocc = new bool[W * H];
-            for (int i = 0; i < bocc.Length; i++) bocc[i] = (tmp[i] != 0); // will set below
-
-            // easier: recompute directly
-            var occ2 = new bool[W * H];
-            for (int r = 0; r < H; r++)
-                for (int c = 0; c < W; c++)
-                    occ2[r * W + c] = occ[r * W + c];
+            // copy nhẹ mảng đếm (H+W phần tử)
+            var rCnt = new int[rowCnt.Length];
+            var cCnt = new int[colCnt.Length];
+            Array.Copy(rowCnt, rCnt, rCnt.Length);
+            Array.Copy(colCnt, cCnt, cCnt.Length);
 
             foreach (var cell in s.GetFilledCells())
             {
-                int r = anchorR + cell.x;
-                int c = anchorC + cell.y;
-                if (IsInside(r, c)) occ2[r * W + c] = true;
+                int r = anchorR + cell.x, c = anchorC + cell.y;
+                if (!IsInside(r, c)) continue;
+                int idx = r * W + c;
+                if (!occ[idx]) { rCnt[r]++; cCnt[c]++; }
             }
 
             int near = 0;
-            // rows
-            for (int r = 0; r < H; r++)
-            {
-                int cnt = 0;
-                for (int c = 0; c < W; c++)
-                    if (occ2[r * W + c]) cnt++;
-                if (W - cnt == missing) near++;
-            }
-            // cols
-            for (int c = 0; c < W; c++)
-            {
-                int cnt = 0;
-                for (int r = 0; r < H; r++)
-                    if (occ2[r * W + c]) cnt++;
-                if (H - cnt == missing) near++;
-            }
+            for (int r = 0; r < H; r++) if (W - rCnt[r] == missing) near++;
+            for (int c = 0; c < W; c++) if (H - cCnt[c] == missing) near++;
             return near;
         }
     }
@@ -636,13 +617,13 @@ public class ShapePalette : MonoBehaviour
         if (_nextSuddenAtMove < 0) ScheduleNextSudden();
         if (moves < _nextSuddenAtMove) return false;
 
-        return UnityEngine.Random.value < config.suddenTriggerChance;
+        return RngValue() < config.suddenTriggerChance;
     }
 
     private void ScheduleNextSudden()
     {
         int moves = (score != null) ? score.MoveCount : _refillCount * 3;
-        int extra = (config.suddenMaxExtraMoves <= 0) ? 0 : UnityEngine.Random.Range(0, config.suddenMaxExtraMoves + 1);
+        int extra = (config.suddenMaxExtraMoves <= 0) ? 0 : RngRange(0, config.suddenMaxExtraMoves + 1);
         _nextSuddenAtMove = moves + Mathf.Max(0, config.suddenMinMoves) + extra;
     }
 
@@ -831,10 +812,10 @@ public class ShapePalette : MonoBehaviour
             var cand = library.GetRandom();
             if (cand == null) continue;
             if (currentHand.Contains(cand)) continue;
-            if (_history.Contains(cand)) continue;
+            if (_historySet.Contains(cand)) continue; // NEW: O(1)
 
             if (Classify(cand) != targetClass)
-                if (_rng.NextDouble() > 0.15) continue; // soft reject
+                if (RngValue() > 0.15f) continue; // soft reject
 
             var eval = EvaluateShape(cand, state);
             if (mustBePlaceable && !eval.anyPlaceable) continue;
@@ -991,4 +972,35 @@ public class ShapePalette : MonoBehaviour
         }
         return top[0].s;
     }
+
+    public bool HasAnyMove(BoardState state)
+    {
+        if (state == null || slots == null) return false;
+
+        int W = state.Width;
+        int H = state.Height;
+
+        for (int i = 0; i < slots.Count; i++)
+        {
+            var s = Peek(i);
+            if (s == null || s.board == null) continue;
+
+            var b = s.GetBounds();
+            if (b.maxR < b.minR) continue;
+
+            int sh = b.maxR - b.minR + 1;
+            int sw = b.maxC - b.minC + 1;
+
+            for (int r = -b.minR; r <= H - sh; r++)
+            {
+                for (int c = -b.minC; c <= W - sw; c++)
+                {
+                    if (state.CanPlace(s, r, c))
+                        return true; // chỉ cần tìm thấy 1 nước là đủ
+                }
+            }
+        }
+        return false; // không có nước nào đặt được
+    }
+
 }

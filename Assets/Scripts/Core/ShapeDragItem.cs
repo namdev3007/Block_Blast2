@@ -1,12 +1,10 @@
 ﻿using System.Collections;
-using System.Linq;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using static UnityEditor.PlayerSettings;
 
 [RequireComponent(typeof(CanvasGroup))]
-public class ShapeDragItem : MonoBehaviour,
+public sealed class ShapeDragItem : MonoBehaviour,
     IPointerDownHandler, IPointerUpHandler,
     IBeginDragHandler, IDragHandler, IEndDragHandler
 {
@@ -53,6 +51,12 @@ public class ShapeDragItem : MonoBehaviour,
     // extra offset để “bay lên” khi nhấn
     private Vector2 _runtimeExtraOffset = Vector2.zero;
 
+    // cache delta màn hình cho (TotalLocalOffset + _anchorFixLocal)
+    private Vector2 _cursorOffsetScreen;
+
+    // --- GameOver guard ---
+    private bool _gameOverTriggered = false;
+
     private void Awake()
     {
         _cg = GetComponent<CanvasGroup>();
@@ -74,10 +78,15 @@ public class ShapeDragItem : MonoBehaviour,
         return s1 - s0;
     }
 
+    private void RecomputeCursorOffsetScreen()
+    {
+        _cursorOffsetScreen = LocalToScreenDelta(TotalLocalOffset + _anchorFixLocal);
+    }
+
     public void OnPointerDown(PointerEventData eventData)
     {
         var data = palette.Peek(slotIndex);
-        if (data == null) return;
+        if (data == null || dragRoot == null || ghostPrefab == null) return;
 
         _draggingData = data;
         _cam = eventData.pressEventCamera; // null nếu Canvas Overlay
@@ -94,12 +103,7 @@ public class ShapeDragItem : MonoBehaviour,
         _grabOffsetLocal = ghostOffsetLocal;
 
         // tạo ghost NGAY lúc nhấn
-        _ghostView = Instantiate(ghostPrefab, dragRoot);
-        _ghostRT = _ghostView.GetComponent<RectTransform>();
-        _ghostView.cellSize = ghostCellSize;
-        _ghostView.spacing = ghostSpacing;
-        _ghostView.Render(_draggingData, spriteForGhost);
-        SetGraphicsRaycastTarget(_ghostView.gameObject, false);
+        CreateGhostIfNeeded(spriteForGhost);
 
         RectTransformUtility.ScreenPointToLocalPointInRectangle(
             dragRoot, eventData.position, _cam, out var startLocal);
@@ -108,6 +112,9 @@ public class ShapeDragItem : MonoBehaviour,
 
         // đặt ghost = vị trí con trỏ + grab + lift
         _ghostRT.anchoredPosition = startLocal + _grabOffsetLocal + _runtimeExtraOffset;
+
+        // Cache delta màn hình 1 lần
+        RecomputeCursorOffsetScreen();
 
         // Ẩn slot gốc ngay khi nhấn (đã có ghost)
         _cg.alpha = 0f;
@@ -158,17 +165,16 @@ public class ShapeDragItem : MonoBehaviour,
             _anchorFixLocal = ComputeTopLeftFixLocal(_draggingData);
             _grabOffsetLocal = ghostOffsetLocal;
 
-            _ghostView = Instantiate(ghostPrefab, dragRoot);
-            _ghostRT = _ghostView.GetComponent<RectTransform>();
-            _ghostView.cellSize = ghostCellSize;
-            _ghostView.spacing = ghostSpacing;
-            _ghostView.Render(_draggingData, skinProvider ? skinProvider.GetTileSprite(_variantIndex) : board.placedSpriteFallback);
-            SetGraphicsRaycastTarget(_ghostView.gameObject, false);
+            var spriteForGhost = skinProvider ? skinProvider.GetTileSprite(_variantIndex) : board.placedSpriteFallback;
+            CreateGhostIfNeeded(spriteForGhost);
 
             RectTransformUtility.ScreenPointToLocalPointInRectangle(
                 dragRoot, eventData.position, _cam, out var startLocal);
             _ghostRT.anchoredPosition = startLocal + _grabOffsetLocal + _runtimeExtraOffset;
         }
+
+        // Cache lại nếu cần
+        RecomputeCursorOffsetScreen();
     }
 
     public void OnDrag(PointerEventData eventData)
@@ -183,10 +189,9 @@ public class ShapeDragItem : MonoBehaviour,
 
         if (_draggingData == null) { board.ClearPreview(); return; }
 
-        var screenPosWithOffset = eventData.position +
-                                  LocalToScreenDelta(TotalLocalOffset + _anchorFixLocal);
+        // dùng offset màn hình đã cache
+        var screenPosWithOffset = eventData.position + _cursorOffsetScreen;
 
-        // ĐỔI từ gridInput.TryGetCell(...) sang:
         if (!TryPickCellWithFallback(screenPosWithOffset, out var targetCell))
         {
             board.ClearPreview();
@@ -218,27 +223,30 @@ public class ShapeDragItem : MonoBehaviour,
         if (_draggingData == null)
         {
             CleanupAfterDrop();
+            // Với nhấc lên rồi thả lại không đặt: vẫn nên kiểm tra moves còn không
+            TryGameOverAfterDrop();
             return;
         }
 
-        // Bù offset (grab + lift + anchorFix) cho raycast
-        var screenPosWithOffset = eventData.position +
-                                  LocalToScreenDelta(TotalLocalOffset + _anchorFixLocal);
+        // Dùng delta màn hình đã cache
+        var screenPosWithOffset = eventData.position + _cursorOffsetScreen;
 
         // Snap về ô gần nhất nếu không raycast trúng
         if (!TryPickCellWithFallback(screenPosWithOffset, out var targetCell))
         {
             CleanupAfterDrop();
+            TryGameOverAfterDrop();
             return;
         }
 
-        var (minR, minC, _, _) = _draggingData.GetBounds();
-        int anchorRow = targetCell.Row - minR;
-        int anchorCol = targetCell.Col - minC;
+        var bounds = _draggingData.GetBounds();
+        int anchorRow = targetCell.Row - bounds.minR;
+        int anchorCol = targetCell.Col - bounds.minC;
 
         if (!board.State.CanPlace(_draggingData, anchorRow, anchorCol))
         {
             CleanupAfterDrop();
+            TryGameOverAfterDrop();
             return;
         }
 
@@ -252,16 +260,15 @@ public class ShapeDragItem : MonoBehaviour,
         int linesCleared = board.ResolveAndClearFullLinesAfterPlacementVariantAndGetCount(
             _draggingData, anchorRow, anchorCol, _variantIndex);
 
-        // 3) Score
+        // 3) Score (không LINQ)
         ScoreResult sr = default;
         if (board.score != null)
         {
-            int blockCells = _draggingData.GetFilledCells().Count();
+            int blockCells = CountFilledCells(_draggingData);
             sr = board.score.OnPiecePlaced(blockCells, linesCleared);
         }
 
-        // === Chuẩn bị dữ liệu chung cho popup (dùng ở nhiều chỗ) ===
-        // Vị trí hiển thị (tâm cụm ô, fallback = vị trí chuột)
+        // === Chuẩn bị dữ liệu chung cho popup ===
         Vector2 pos;
         if (!ComputePlacedCentroidScreen(_draggingData, anchorRow, anchorCol, _cam, out pos))
             pos = eventData.position;
@@ -283,11 +290,9 @@ public class ShapeDragItem : MonoBehaviour,
         // 4) Popups (Combo -> Points & Praise)
         if (Popup != null && linesCleared > 0)
         {
-            // Combo (nếu đủ ngưỡng)
             if (willShowCombo)
                 Popup.ShowComboAtScreenPoint(comboThisTurn, pos, _cam, comboOff);
 
-            // Points & Praise
             if (sr.linePointsFinal > 0)
             {
                 if (willShowCombo)
@@ -301,10 +306,9 @@ public class ShapeDragItem : MonoBehaviour,
             }
         }
 
-        // 4b) Thưởng clear toàn bảng (nếu có) — dùng lại pos/pointsOff/willShowCombo
+        // 4b) Thưởng clear toàn bảng (nếu có)
         if (board != null && board.IsBoardCompletelyEmpty())
         {
-            // Cộng điểm bonus (nếu bạn có hàm này)
             if (board.score != null)
                 board.score.AwardBoardClearBonus();
 
@@ -322,8 +326,10 @@ public class ShapeDragItem : MonoBehaviour,
         // 5) Tiêu thụ slot & dọn
         palette.Consume(slotIndex);
         CleanupAfterDrop();
-    }
 
+        // 6) Kiểm tra còn nước đi không -> wave game over
+        TryGameOverAfterDrop();
+    }
 
     private IEnumerator ShowPointsAndPraiseLater(int points, int linesCleared, Vector2 pos, Camera cam, Vector2 offset, float delay)
     {
@@ -342,6 +348,46 @@ public class ShapeDragItem : MonoBehaviour,
         }
     }
 
+    // ====== GAME OVER CHECK ======
+    private void TryGameOverAfterDrop()
+    {
+        if (_gameOverTriggered || board == null || palette == null) return;
+        // Đợi 1 frame để Palette có thể refill xong (nếu refill ngay sau Consume)
+        StartCoroutine(CoCheckGameOverNextFrame());
+    }
+
+    private IEnumerator CoCheckGameOverNextFrame()
+    {
+        yield return null; // chờ end-of-frame/refill
+                           // Nếu palette.Refill() trễ hơn, có thể chờ thêm:
+                           // yield return null;
+
+        int slotCount = 0;
+        if (palette.slots != null) slotCount = palette.slots.Count;
+        else slotCount = 3; // fallback an toàn
+
+        bool anyMove = false;
+        for (int i = 0; i < slotCount; i++)
+        {
+            var s = palette.Peek(i);
+            if (s == null) continue;
+            if (board.CanPlaceAnywhere(s))
+            {
+                anyMove = true;
+                break;
+            }
+        }
+
+        if (!anyMove)
+        {
+            _gameOverTriggered = true;
+
+            // Giao flow cho GameManager để xử lý Revive Panel
+            GameManager.Instance?.OnNoMovesLeft();
+        }
+    }
+
+
     private bool TryPickCellWithFallback(Vector2 screenPos, out GridSquareView targetCell)
     {
         // 1) Thử raycast UI như cũ
@@ -352,6 +398,24 @@ public class ShapeDragItem : MonoBehaviour,
         return gridView.TryGetNearestCellByScreenPoint(screenPos, _cam, out targetCell, out _, out _);
     }
 
+    private void OnEnable()
+    {
+        if (GameManager.Instance != null)
+            GameManager.Instance.GameStateChanged += HandleGameStateChanged;
+    }
+
+    private void OnDisable()
+    {
+        if (GameManager.Instance != null)
+            GameManager.Instance.GameStateChanged -= HandleGameStateChanged;
+    }
+
+    private void HandleGameStateChanged(GameState s)
+    {
+        if (s == GameState.Playing)
+            _gameOverTriggered = false;
+    }
+
 
     private void CleanupAfterDrop()
     {
@@ -359,6 +423,18 @@ public class ShapeDragItem : MonoBehaviour,
         _ghostRT = null; _ghostView = null;
         _draggingData = null;
         _runtimeExtraOffset = Vector2.zero;
+        _cg.alpha = 1f;
+    }
+
+    private void CreateGhostIfNeeded(Sprite spriteForGhost)
+    {
+        if (_ghostRT != null) return;
+        _ghostView = Instantiate(ghostPrefab, dragRoot);
+        _ghostRT = _ghostView.GetComponent<RectTransform>();
+        _ghostView.cellSize = ghostCellSize;
+        _ghostView.spacing = ghostSpacing;
+        _ghostView.Render(_draggingData, spriteForGhost);
+        SetGraphicsRaycastTarget(_ghostView.gameObject, false);
     }
 
     private static void SetGraphicsRaycastTarget(GameObject root, bool value)
@@ -403,5 +479,13 @@ public class ShapeDragItem : MonoBehaviour,
         return false;
     }
 
-
+    private static int CountFilledCells(ShapeData s)
+    {
+        if (s == null || s.board == null) return 0;
+        int n = 0;
+        for (int r = 0; r < s.rows; r++)
+            for (int c = 0; c < s.columns; c++)
+                if (s.board[r].column[c]) n++;
+        return n;
+    }
 }

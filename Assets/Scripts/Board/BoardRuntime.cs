@@ -50,6 +50,8 @@ public class BoardRuntime : MonoBehaviour
 
     Coroutine _introCR;
 
+    private readonly List<int> _gameOverGhostIdx = new();
+
     private void Awake()
     {
         if (gridView == null) gridView = GetComponent<GridView>();
@@ -455,5 +457,91 @@ public class BoardRuntime : MonoBehaviour
 
         for (int i = 0; i < k && i < all.Count; i++) list.Add(all[i]);
         return list;
+    }
+
+    public bool CanPlaceAnywhere(ShapeData shape)
+    {
+        if (shape == null || gridView == null || State == null) return false;
+
+        int W = gridView.columns;
+        int H = gridView.rows;
+
+        // Giới hạn anchor để không phải duyệt out-of-bounds quá nhiều (nhanh hơn)
+        var (minR, minC, maxR, maxC) = shape.GetBounds();
+        int shapeH = maxR - minR + 1;
+        int shapeW = maxC - minC + 1;
+
+        int rMin = 0;
+        int cMin = 0;
+        int rMax = H - shapeH;
+        int cMax = W - shapeW;
+
+        for (int r = rMin; r <= rMax; r++)
+            for (int c = cMin; c <= cMax; c++)
+                if (State.CanPlace(shape, r, c))
+                    return true;
+
+        return false;
+    }
+    public void PlayGameOverWave(
+    float rowStep = 0.05f,
+    float colJitter = 0.01f,
+    float alpha = 0.85f,
+    bool overwriteOnOccupied = true)
+    {
+        if (gridView == null || gridView.Cells == null) return;
+
+        int W = gridView.columns;
+        int H = gridView.rows;
+
+        _gameOverGhostIdx.Clear();
+
+        // Chọn sprite cho từng ô:
+        // - Nếu ô đang Occupied: dùng sprite hiện có để trông khớp
+        // - Nếu ô trống: rút từ skin.RollVariant() hoặc fallback
+        for (int r = H - 1; r >= 0; r--) // từ dưới lên
+        {
+            for (int c = 0; c < W; c++)
+            {
+                int idx = r * W + c;
+                var cell = gridView.Cells[idx];
+
+                bool occupied = State.IsOccupied(r, c);
+                if (!overwriteOnOccupied && occupied)
+                {
+                    continue; // bỏ qua ô đã có block thật nếu không overwrite
+                }
+
+                Sprite s = null;
+                if (occupied)
+                {
+                    // Lấy đúng sprite đang hiển thị để "ghost" trông giống
+                    s = cell.CurrentSprite;
+                }
+                else
+                {
+                    // Ô trống -> lấy skin variant ngẫu nhiên để phủ
+                    int variant = skin != null ? skin.RollVariant() : 0;
+                    s = skin != null ? skin.GetTileSprite(variant) : placedSpriteFallback;
+                }
+
+                // delay theo hàng, có jitter theo cột
+                float delay = (H - 1 - r) * rowStep + Random.Range(0f, colJitter);
+
+                cell.PlayGameOverGhost(s, delay, 0.12f, alpha);
+                _gameOverGhostIdx.Add(idx);
+            }
+        }
+    }
+
+    public void ClearGameOverGhosts(bool instant = false, float fadeOut = 0.15f)
+    {
+        if (gridView == null || gridView.Cells == null) return;
+        foreach (var idx in _gameOverGhostIdx)
+        {
+            if (idx >= 0 && idx < gridView.Cells.Count)
+                gridView.Cells[idx].HideIntroGhost(instant, fadeOut);
+        }
+        _gameOverGhostIdx.Clear();
     }
 }
