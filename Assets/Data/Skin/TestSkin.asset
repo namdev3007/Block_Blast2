@@ -12,4 +12,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e551467b5ae5d7e4cbd925ae4528102a, type: 3}
   m_Name: TestSkin
   m_EditorClassIdentifier: 
-  tileVariants: []
+  tileVariants:
+  - {fileID: 7142058395466351922, guid: 59c1846c66b725c4fba27d6cc699b9c9, type: 3}

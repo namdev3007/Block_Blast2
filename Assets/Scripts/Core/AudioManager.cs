@@ -8,6 +8,9 @@ public class AudioManager : MonoBehaviour
     public static AudioManager Instance { get; private set; }
 
     public AudioClip defaultBgm;
+    public AudioClip homeBgm;
+    public AudioClip gameplayBgm;
+
     public AudioMixer mixer;
     public string bgmVolumeParam = "BGMVol";
     public string sfxVolumeParam = "SFXVol";
@@ -17,11 +20,9 @@ public class AudioManager : MonoBehaviour
     public AudioClip clickSfx;
     public AudioClip startGameSfx;
     public AudioClip increaseSfx;
-
     public AudioClip pickupSfx;
     public AudioClip dropSfx;
     public AudioClip[] clearComboSfxByTier;
-
     public AudioClip goodSfx;
     public AudioClip greatSfx;
     public AudioClip excellentSfx;
@@ -45,7 +46,6 @@ public class AudioManager : MonoBehaviour
 
     private bool _musicEnabled = true;
     private bool _sfxEnabled = true;
-
     [Range(0f, 1f)][SerializeField] private float _musicVolume = DEFAULT_MUSIC_VOL_01;
     [Range(0f, 1f)][SerializeField] private float _sfxVolume = 1f;
 
@@ -106,18 +106,18 @@ public class AudioManager : MonoBehaviour
         yield return null;
         UpdateMusicGain();
         UpdateSfxGain();
-        EnsureBgmPlaying();
+        PlayMenuBgm();
     }
 
     private void EnsureBgmPlaying()
     {
         if (!musicSource) return;
         if (!musicSource.clip) musicSource.clip = defaultBgm;
-
+        musicSource.loop = true;
         if (_musicEnabled && musicSource.clip && !musicSource.isPlaying)
         {
             AudioListener.pause = false;
-            musicSource.PlayDelayed(0.01f);
+            musicSource.Play();
         }
         else if (!_musicEnabled && musicSource.isPlaying)
         {
@@ -151,14 +151,8 @@ public class AudioManager : MonoBehaviour
         PlayerPrefs.SetInt(KEY_MUSIC, on ? 1 : 0);
         PlayerPrefs.Save();
         UpdateMusicGain();
-
         if (!musicSource) return;
-        if (on)
-        {
-            if (!musicSource.clip) musicSource.clip = defaultBgm;
-            EnsureBgmPlaying();
-        }
-        else musicSource.Pause();
+        if (on) EnsureBgmPlaying(); else musicSource.Pause();
     }
 
     public void SetSfxEnabled(bool on)
@@ -242,6 +236,16 @@ public class AudioManager : MonoBehaviour
         musicSource.loop = loop;
         musicSource.clip = clip ? clip : defaultBgm;
         EnsureBgmPlaying();
+    }
+
+    public void PlayMenuBgm()
+    {
+        PlayBgm(homeBgm ? homeBgm : defaultBgm, true);
+    }
+
+    public void PlayGameplayBgm()
+    {
+        PlayBgm(gameplayBgm ? gameplayBgm : defaultBgm, true);
     }
 
     public void PlayComboTier(int comboLevel)

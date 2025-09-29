@@ -13,24 +13,24 @@ public class ShapePalette : MonoBehaviour
     public SkinProvider skinProvider;
 
     [Header("Spawn Config")]
-    public ShapeSpawnConfig config; // assign via Inspector
+    public ShapeSpawnConfig config;
 
     [Header("Anti-repeat")]
     public int historyKeep = 6;
 
-    // === Sudden-Death hooks (tuỳ chọn) ===
-    public GameScore score; // nếu muốn tính theo MoveCount thực
+    [Header("Runtime Options")]
+    public bool autoRefillOnStart = false;
 
-    // runtime
+    public GameScore score;
+
     private readonly List<ShapeData> _current = new();
     private readonly Queue<ShapeData> _history = new();
-    private readonly HashSet<ShapeData> _historySet = new(); // NEW: O(1) check
+    private readonly HashSet<ShapeData> _historySet = new();
     private readonly List<int> _slotVariants = new();
 
     private System.Random _rng;
     private int _refillCount;
 
-    // --- Sudden-Death runtime ---
     public event System.Action SuddenGameOver;
 
     private class SuddenState
@@ -51,37 +51,26 @@ public class ShapePalette : MonoBehaviour
     private void Awake()
     {
         _rng = new System.Random();
-
-        if (config == null)
-        {
-            Debug.LogWarning($"{name}: ShapeSpawnConfig is null. Creating a runtime instance (won't be saved).");
-            config = ScriptableObject.CreateInstance<ShapeSpawnConfig>();
-        }
+        if (config == null) config = ScriptableObject.CreateInstance<ShapeSpawnConfig>();
     }
 
-    private void Start() => Refill();
+    private void Start()
+    {
+        if (autoRefillOnStart) Refill();
+    }
 
-    // ========================= PUBLIC API =========================
     public void Refill()
     {
         if (library == null || slots == null || slots.Count == 0) return;
 
-        // 1) High-line priority (6 → 5) → 2) Sudden Death → 3) Normal bag/hand
         List<ShapeData> hand = null;
 
         float r = RngValue();
-        if (r < config.highLine6Chance)
-        {
-            hand = TryBuildHighLineHandOrBag(slots.Count, minLines: 6);
-        }
-        else if (r < config.highLine6Chance + config.highLine5Chance)
-        {
-            hand = TryBuildHighLineHandOrBag(slots.Count, minLines: 5);
-        }
+        if (r < config.highLine6Chance) hand = TryBuildHighLineHandOrBag(slots.Count, 6);
+        else if (r < config.highLine6Chance + config.highLine5Chance) hand = TryBuildHighLineHandOrBag(slots.Count, 5);
 
         if (hand == null)
         {
-            // Sudden-Death?
             bool shouldSudden = ShouldTriggerSuddenDeath();
 
             if (shouldSudden && slots.Count >= 3 && board != null && board.State != null)
@@ -126,7 +115,6 @@ public class ShapePalette : MonoBehaviour
             }
         }
 
-        // Render hand
         _current.Clear(); _current.AddRange(hand);
         _slotVariants.Clear();
 
@@ -177,7 +165,6 @@ public class ShapePalette : MonoBehaviour
             _historySet.Remove(removed);
         }
 
-        // Sudden: bỏ khối vừa dùng khỏi remaining
         if (IsSuddenActive) _sudden.remaining.Remove(consumed);
 
         _current[slotIndex] = null;
@@ -194,7 +181,7 @@ public class ShapePalette : MonoBehaviour
 
         if (_sudden.remaining.Count == 0)
         {
-            _sudden.active = false; // Hoàn tất thử thách
+            _sudden.active = false;
             return true;
         }
 
@@ -213,7 +200,6 @@ public class ShapePalette : MonoBehaviour
         Time.timeScale = 0f;
     }
 
-    // ========================= Core helpers =========================
     private bool AllConsumed()
     {
         for (int i = 0; i < _current.Count; i++)
@@ -221,7 +207,6 @@ public class ShapePalette : MonoBehaviour
         return true;
     }
 
-    // ---------- DDA (no ramp) ----------
     private ClassWeights ComputeWeightsWithDDA()
     {
         var W = config.baseWeights;
@@ -251,7 +236,6 @@ public class ShapePalette : MonoBehaviour
         return W;
     }
 
-    // ---------- Hand builder ----------
     private List<ShapeData> BuildHandSmart(int count)
     {
         var state = board != null ? board.State : null;
@@ -301,7 +285,6 @@ public class ShapePalette : MonoBehaviour
         return hand;
     }
 
-    // ---------- Triplet Bag ----------
     private List<ShapeData> BuildTripletBagForCurrentBoard(int needed)
     {
         var state = board.State;
@@ -309,7 +292,6 @@ public class ShapePalette : MonoBehaviour
         var candidates = new List<(ShapeData a, ShapeData b, ShapeData c)>();
         int trials = 0;
 
-        // Optional: hole-filler injection
         List<ShapeData> holeFits = null;
         bool tryHoleFiller = config.enableHoleFiller && config.holeFillerAffectsBag &&
                              (RngValue() < config.holeFillerChance);
@@ -390,19 +372,16 @@ public class ShapePalette : MonoBehaviour
         return true;
     }
 
-    // ---------- High-Line builder (≥ N lines) ----------
     private List<ShapeData> TryBuildHighLineHandOrBag(int needed, int minLines)
     {
         if (board == null || board.State == null) return null;
 
-        // Ưu tiên bag nếu đang bật bag
         if (config.useTripletBag && needed >= 3)
         {
             var bag = BuildTripletBagForCurrentBoard(needed);
             if (BagHasAnyMinLines(bag, minLines, board.State)) return bag;
         }
 
-        // Thử hand thường nhiều lần với ràng buộc ≥ minLines
         for (int attempt = 0; attempt < config.maxHandBuildAttempts; attempt++)
         {
             var hand = BuildHandSmart(needed);
@@ -430,13 +409,12 @@ public class ShapePalette : MonoBehaviour
         return false;
     }
 
-    // ---------- Snapshot simulator (OPTIMIZED) ----------
     private sealed class BoardSnapshot
     {
         public readonly int W, H;
         private readonly bool[] occ;
-        private readonly int[] rowCnt; // số ô đã chiếm theo hàng
-        private readonly int[] colCnt; // số ô đã chiếm theo cột
+        private readonly int[] rowCnt;
+        private readonly int[] colCnt;
 
         public BoardSnapshot(BoardState st)
         {
@@ -523,7 +501,6 @@ public class ShapePalette : MonoBehaviour
 
         public int CountNearFullLinesIfPlaced(ShapeData s, int anchorR, int anchorC, int missing = 1)
         {
-            // copy nhẹ mảng đếm (H+W phần tử)
             var rCnt = new int[rowCnt.Length];
             var cCnt = new int[colCnt.Length];
             Array.Copy(rowCnt, rCnt, rCnt.Length);
@@ -544,7 +521,6 @@ public class ShapePalette : MonoBehaviour
         }
     }
 
-    // ---------- Search chains ----------
     private bool ExistsSequentialPlacement(BoardSnapshot start, ShapeData[] shapes, bool requireAnyLineClear = false)
     {
         int[][] perms = {
@@ -605,7 +581,6 @@ public class ShapePalette : MonoBehaviour
         return false;
     }
 
-    // ---------- Sudden-Death scheduling ----------
     private bool ShouldTriggerSuddenDeath()
     {
         if (!config.suddenDeathEnabled) return false;
@@ -666,7 +641,6 @@ public class ShapePalette : MonoBehaviour
         return null;
     }
 
-    // ---------- Hole Filler ----------
     private struct EmptyRegion
     {
         public int top, left, height, width, count;
@@ -787,7 +761,6 @@ public class ShapePalette : MonoBehaviour
         return res;
     }
 
-    // ---------- Smart picker ----------
     private ShapeData PickSmallAndPlaceable(BoardState state)
     {
         for (int tries = 0; tries < 64; tries++)
@@ -812,10 +785,10 @@ public class ShapePalette : MonoBehaviour
             var cand = library.GetRandom();
             if (cand == null) continue;
             if (currentHand.Contains(cand)) continue;
-            if (_historySet.Contains(cand)) continue; // NEW: O(1)
+            if (_historySet.Contains(cand)) continue;
 
             if (Classify(cand) != targetClass)
-                if (RngValue() > 0.15f) continue; // soft reject
+                if (RngValue() > 0.15f) continue;
 
             var eval = EvaluateShape(cand, state);
             if (mustBePlaceable && !eval.anyPlaceable) continue;
@@ -853,7 +826,7 @@ public class ShapePalette : MonoBehaviour
         public int cells;
         public int placements;
         public int maxLineClears;
-        public int bestChainPotential; // số line gần full (thiếu 1 ô) tốt nhất sau khi thử đặt
+        public int bestChainPotential;
         public bool anyPlaceable => placements > 0;
     }
 
@@ -878,7 +851,6 @@ public class ShapePalette : MonoBehaviour
                 int clears = snap.CountLinesCompletedIfPlaced(s, r, c);
                 if (clears > e.maxLineClears) e.maxLineClears = clears;
 
-                // Ưu tiên giữ chuỗi: đếm số line còn thiếu 1 ô (row/col) sau khi đặt thử
                 int near = snap.CountNearFullLinesIfPlaced(s, r, c, missing: 1);
                 if (near > e.bestChainPotential) e.bestChainPotential = near;
             }
@@ -893,14 +865,14 @@ public class ShapePalette : MonoBehaviour
 
         score += config.wPlacementCount * AdjustToTarget(e.placements, config.minPlacementsTarget, config.maxPlacementsTarget);
         score += config.wLineClear * e.maxLineClears;
-        score += config.wChainPotential * e.bestChainPotential;   // mới
+        score += config.wChainPotential * e.bestChainPotential;
         score += config.wArea * e.cells;
 
         int sameArea = 0;
         foreach (var x in currentHand) if (x != null && CountCells(x) == e.cells) sameArea++;
         score -= 0.5f * sameArea;
 
-        score += (float)_rng.NextDouble() * 0.01f; // break ties
+        score += (float)_rng.NextDouble() * 0.01f;
         return score;
     }
 
@@ -977,9 +949,6 @@ public class ShapePalette : MonoBehaviour
     {
         if (state == null || slots == null) return false;
 
-        int W = state.Width;
-        int H = state.Height;
-
         for (int i = 0; i < slots.Count; i++)
         {
             var s = Peek(i);
@@ -991,26 +960,19 @@ public class ShapePalette : MonoBehaviour
             int sh = b.maxR - b.minR + 1;
             int sw = b.maxC - b.minC + 1;
 
-            for (int r = -b.minR; r <= H - sh; r++)
-            {
-                for (int c = -b.minC; c <= W - sw; c++)
-                {
-                    if (state.CanPlace(s, r, c))
-                        return true; // chỉ cần tìm thấy 1 nước là đủ
-                }
-            }
+            for (int r = -b.minR; r <= state.Height - sh; r++)
+                for (int c = -b.minC; c <= state.Width - sw; c++)
+                    if (state.CanPlace(s, r, c)) return true;
         }
-        return false; // không có nước nào đặt được
+        return false;
     }
 
     public void RestoreFromSave(GameSaveV1 s)
     {
-        if (library == null) { Debug.LogWarning("ShapePalette: library null"); return; }
-        if (slots == null || slots.Count == 0) return;
+        if (library == null || slots == null || slots.Count == 0) return;
 
         int n = Mathf.Min(slots.Count, s.paletteSize);
 
-        // đảm bảo mảng runtime khớp size
         while (_current.Count < slots.Count) _current.Add(null);
         while (_slotVariants.Count < slots.Count) _slotVariants.Add(0);
 
@@ -1028,7 +990,6 @@ public class ShapePalette : MonoBehaviour
             }
         }
 
-        // nếu còn slot ngoài phạm vi save -> clear
         for (int i = n; i < slots.Count; i++) ClearSlot(i);
     }
 
@@ -1040,7 +1001,6 @@ public class ShapePalette : MonoBehaviour
         if (i >= _slotVariants.Count) _slotVariants.Add(variant);
         else _slotVariants[i] = variant;
 
-        // cập nhật hiển thị
         Sprite displaySprite = (skinProvider != null)
             ? skinProvider.GetTileSprite(variant)
             : (board != null ? board.placedSpriteFallback : null);
@@ -1068,5 +1028,4 @@ public class ShapePalette : MonoBehaviour
             if (cg) cg.alpha = 0.3f;
         }
     }
-
 }

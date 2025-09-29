@@ -12,4 +12,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e551467b5ae5d7e4cbd925ae4528102a, type: 3}
   m_Name: JellyData
   m_EditorClassIdentifier: 
-  tileVariants: []
+  tileVariants:
+  - {fileID: -9220237665829460684, guid: 754895ea2a63df64aa79b76f1e6710d6, type: 3}
+  - {fileID: 7796783136508318364, guid: 2cb8c9628953a9e48a9bbecd3ea641f9, type: 3}
+  - {fileID: -3795250865207020088, guid: 7c153d14f44fb9046bfd20d90b594d6b, type: 3}
+  - {fileID: 9064907555943394170, guid: 936fa569a3ba47a4083e123ddb418f17, type: 3}
+  - {fileID: -8358346960793276072, guid: 14ac4e6d05f37164081dbd0c4d707745, type: 3}
+  - {fileID: -5026500190516190714, guid: 6a621eee421f694419d7971deb7a8def, type: 3}
+  - {fileID: 6761815010171316512, guid: 638c97d4227e1854882c1234b246e4ff, type: 3}
+  - {fileID: 1958178098259854704, guid: af9ca7e0069746e4e8a3431a58e73a5f, type: 3}
+  - {fileID: -3580156612306598181, guid: 41b405c7297749549a2afe90c04e2f13, type: 3}

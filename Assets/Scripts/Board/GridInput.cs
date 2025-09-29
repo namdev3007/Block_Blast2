@@ -5,8 +5,8 @@ using UnityEngine.UI;
 
 public class GridInput : MonoBehaviour
 {
-    public GraphicRaycaster raycaster;    // gán GraphicRaycaster của Canvas
-    public EventSystem eventSystem;       // gán EventSystem trong scene
+    public GraphicRaycaster raycaster;  
+    public EventSystem eventSystem;     
 
     public bool TryGetCell(Vector2 screenPos, out GridSquareView cell)
     {
