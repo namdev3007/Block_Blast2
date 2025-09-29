@@ -1003,4 +1003,70 @@ public class ShapePalette : MonoBehaviour
         return false; // không có nước nào đặt được
     }
 
+    public void RestoreFromSave(GameSaveV1 s)
+    {
+        if (library == null) { Debug.LogWarning("ShapePalette: library null"); return; }
+        if (slots == null || slots.Count == 0) return;
+
+        int n = Mathf.Min(slots.Count, s.paletteSize);
+
+        // đảm bảo mảng runtime khớp size
+        while (_current.Count < slots.Count) _current.Add(null);
+        while (_slotVariants.Count < slots.Count) _slotVariants.Add(0);
+
+        for (int i = 0; i < n; i++)
+        {
+            if (s.shapeIds != null && i < s.shapeIds.Length && s.shapeIds[i] >= 0)
+            {
+                var data = library.GetById(s.shapeIds[i]);
+                int variant = (s.shapeVariants != null && i < s.shapeVariants.Length) ? s.shapeVariants[i] : 0;
+                SetSlot(i, data, variant);
+            }
+            else
+            {
+                ClearSlot(i);
+            }
+        }
+
+        // nếu còn slot ngoài phạm vi save -> clear
+        for (int i = n; i < slots.Count; i++) ClearSlot(i);
+    }
+
+    public void SetSlot(int i, ShapeData data, int variant)
+    {
+        if (i < 0 || i >= slots.Count) return;
+
+        _current[i] = data;
+        if (i >= _slotVariants.Count) _slotVariants.Add(variant);
+        else _slotVariants[i] = variant;
+
+        // cập nhật hiển thị
+        Sprite displaySprite = (skinProvider != null)
+            ? skinProvider.GetTileSprite(variant)
+            : (board != null ? board.placedSpriteFallback : null);
+
+        if (slots[i] != null)
+        {
+            if (data != null) slots[i].Render(data, displaySprite);
+            else slots[i].Clear();
+
+            var cg = slots[i].GetComponentInParent<CanvasGroup>();
+            if (cg) cg.alpha = (data != null) ? 1f : 0.3f;
+        }
+    }
+
+    public void ClearSlot(int i)
+    {
+        if (i < 0 || i >= slots.Count) return;
+        _current[i] = null;
+        if (i < _slotVariants.Count) _slotVariants[i] = 0;
+
+        if (slots[i] != null)
+        {
+            slots[i].Clear();
+            var cg = slots[i].GetComponentInParent<CanvasGroup>();
+            if (cg) cg.alpha = 0.3f;
+        }
+    }
+
 }

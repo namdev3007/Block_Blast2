@@ -1,243 +1,141 @@
-﻿using TMPro;
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using UnityEngine.Events;
 using DG.Tweening;
 
 public class LoadingPanel : MonoBehaviour
 {
-    [Header("Progress UI")]
-    public Slider progressBar;
-    public TextMeshProUGUI percentText;
+    [Header("UI")]
+    [SerializeField] private Slider progressBar;
+    [SerializeField] private TMP_Text progressLabel;
+    [SerializeField] private float tweenDuration = 0.2f;
 
-    [Header("Tile Prefab & Root")]
-    public RectTransform tilesRoot;          // để trống: sẽ tự tạo child "TilesRoot"
-    public GameObject tilePrefab;
+    [Header("Behavior")]
+    [SerializeField] private float minShowSeconds = 1f; // hiển thị tối thiểu
 
-    [Header("Tile Layout")]
-    public float cell = 64f;
-    public float animTime = 0.6f;
-    public float holdTime = 0.25f;
-    public float bounce = 1.08f;
+    private float _visualProgress = 0f;
+    private Tweener _progressTweener;
 
-    [Header("Options")]
-    public bool playOnEnable = true;
-    public bool useUnscaledTime = true;
-
-    [Header("Auto Close at 100%")]
-    public bool autoCloseAt100 = true;
-    public float closeDelay = 0.2f;
-    public bool fadeOut = true;
-    public float fadeDuration = 0.25f;
-    [Tooltip("Để trống nếu bạn muốn dùng onCompleted tự gọi UI/GameManager")]
-    public GameObject homePanel;
-    public UnityEvent onCompleted;
-
-    // runtime
-    private RectTransform[] tiles = new RectTransform[4];
-    private RectTransform _tilesContainer;    // NEW: container riêng
-    private Sequence _seq;
-    private float _target, _display;
-    private CanvasGroup _cg;
-    private bool _closeFired;                 // NEW: guard thay cho autoCloseAt100
+    void Reset()
+    {
+        progressBar = GetComponentInChildren<Slider>();
+        progressLabel = GetComponentInChildren<TMP_Text>();
+    }
 
     void Awake()
     {
-        _cg = GetComponent<CanvasGroup>();
-        if (_cg == null) _cg = gameObject.AddComponent<CanvasGroup>();
-        _cg.alpha = 1f;
-
-        if (!tilesRoot) tilesRoot = transform as RectTransform;
-
-        // Tạo container riêng cho tiles nếu chưa có
-        var t = tilesRoot.Find("TilesRoot") as RectTransform;
-        if (!t)
-        {
-            var go = new GameObject("TilesRoot", typeof(RectTransform));
-            _tilesContainer = go.GetComponent<RectTransform>();
-            _tilesContainer.SetParent(tilesRoot, false);
-            _tilesContainer.anchorMin = _tilesContainer.anchorMax = new Vector2(0.5f, 0.5f);
-            _tilesContainer.pivot = new Vector2(0.5f, 0.5f);
-            _tilesContainer.anchoredPosition = Vector2.zero;
-        }
-        else _tilesContainer = t;
-    }
-
-    void OnEnable()
-    {
-        _display = _target = 0f;
-        _cg.alpha = 1f;
-        _closeFired = false;                 // NEW: reset guard mỗi lần bật
-        UpdateProgressUI();
-        EnsureTiles();
-        if (playOnEnable) StartTiles();
-    }
-
-    void OnDisable()
-    {
-        _seq?.Kill();
-        _seq = null;
-    }
-
-    void Update()
-    {
-        float dt = useUnscaledTime ? Time.unscaledDeltaTime : Time.deltaTime; // NEW
-        // smoothing 60fps-independent
-        _display = Mathf.Lerp(_display, _target, 1f - Mathf.Pow(1f - 0.18f, dt * 60f));
-        UpdateProgressUI();
-
-        if (!_closeFired && autoCloseAt100 && _target >= 1f && _display >= 0.999f)
-        {
-            _closeFired = true;              // NEW: chỉ bắn 1 lần, không đổi option
-            CompleteAndOpenHome();
-        }
-    }
-
-    public void Show(bool on)
-    {
-        gameObject.SetActive(on);
-        if (on)
-        {
-            EnsureTiles();
-            if (_seq == null) StartTiles();
-        }
-        else
-        {
-            _seq?.Kill(); _seq = null;
-        }
-    }
-
-    public void SetProgress01(float value01) => _target = Mathf.Clamp01(value01);
-
-    public void ForceComplete()
-    {
-        _target = 1f;
-        _display = 1f;
-        UpdateProgressUI();
-        if (!_closeFired) { _closeFired = true; CompleteAndOpenHome(); }
-    }
-
-    public void SetTileSprite(Sprite sp)
-    {
-        if (sp == null) return;
-        for (int i = 0; i < tiles.Length; i++)
-        {
-            if (!tiles[i]) continue;
-            var img = tiles[i].GetComponent<Image>();
-            if (img) img.sprite = sp;
-        }
-    }
-
-    void UpdateProgressUI()
-    {
-        if (progressBar) progressBar.value = _display;
-        if (percentText) percentText.text = Mathf.RoundToInt(_display * 100f) + "%";
-    }
-
-    void EnsureTiles()
-    {
-        if (!_tilesContainer) return;
-        // Chỉ xoá các tile cũ bên trong TilesRoot (không đụng các UI khác)
-        for (int i = _tilesContainer.childCount - 1; i >= 0; i--)
-            Destroy(_tilesContainer.GetChild(i).gameObject);
-
-        if (!tilePrefab)
-        {
-            Debug.LogWarning($"{name}: tilePrefab chưa gán!");
-            return;
-        }
-
-        for (int i = 0; i < 4; i++)
-        {
-            var go = Instantiate(tilePrefab, _tilesContainer);
-            var rt = go.GetComponent<RectTransform>() ?? go.AddComponent<RectTransform>();
-            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
-            rt.pivot = new Vector2(0.5f, 0.5f);
-            tiles[i] = rt;
-        }
-    }
-
-    void StartTiles()
-    {
-        if (!tiles[0] || !tiles[1] || !tiles[2] || !tiles[3]) return;
-
-        Vector2 L0 = new Vector2(0f, cell);
-        Vector2 L1 = new Vector2(0f, 0f);
-        Vector2 L2 = new Vector2(0f, -cell);
-        Vector2 L3 = new Vector2(cell, -cell);
-
-        Vector2 Q0 = new Vector2(-cell * 0.5f, cell * 0.5f);
-        Vector2 Q1 = new Vector2(cell * 0.5f, cell * 0.5f);
-        Vector2 Q2 = new Vector2(-cell * 0.5f, -cell * 0.5f);
-        Vector2 Q3 = new Vector2(cell * 0.5f, -cell * 0.5f);
-
-        tiles[0].anchoredPosition = L0; tiles[1].anchoredPosition = L1;
-        tiles[2].anchoredPosition = L2; tiles[3].anchoredPosition = L3;
-        tiles[0].localScale = tiles[1].localScale = tiles[2].localScale = tiles[3].localScale = Vector3.one;
-
-        _seq?.Kill();
-        _seq = DOTween.Sequence().SetAutoKill(false).SetLoops(-1, LoopType.Restart)
-                                 .SetUpdate(useUnscaledTime);
-
-        _seq.Append(MorphTiles((L0, L1, L2, L3), (Q0, Q1, Q2, Q3), animTime));
-        _seq.Append(Bounce(holdTime));
-        _seq.Append(MorphTiles((Q0, Q1, Q2, Q3), (L0, L1, L2, L3), animTime));
-        _seq.Append(Bounce(holdTime));
-    }
-
-    Tween MorphTiles((Vector2 a0, Vector2 a1, Vector2 a2, Vector2 a3) from,
-                     (Vector2 b0, Vector2 b1, Vector2 b2, Vector2 b3) to,
-                     float t)
-    {
-        var s = DOTween.Sequence();
-        s.Join(tiles[0].DOAnchorPos(to.b0, t).SetEase(Ease.InOutSine));
-        s.Join(tiles[1].DOAnchorPos(to.b1, t).SetEase(Ease.InOutSine));
-        s.Join(tiles[2].DOAnchorPos(to.b2, t).SetEase(Ease.InOutSine));
-        s.Join(tiles[3].DOAnchorPos(to.b3, t).SetEase(Ease.InOutSine));
-        return s;
-    }
-
-    Tween Bounce(float hold)
-    {
-        var s = DOTween.Sequence();
-        s.Append(tiles[0].DOScale(bounce, 0.12f).SetEase(Ease.OutBack));
-        s.Join(tiles[1].DOScale(bounce, 0.12f).SetEase(Ease.OutBack));
-        s.Join(tiles[2].DOScale(bounce, 0.12f).SetEase(Ease.OutBack));
-        s.Join(tiles[3].DOScale(bounce, 0.12f).SetEase(Ease.OutBack));
-        s.AppendInterval(hold);
-        s.Append(tiles[0].DOScale(1f, 0.10f));
-        s.Join(tiles[1].DOScale(1f, 0.10f));
-        s.Join(tiles[2].DOScale(1f, 0.10f));
-        s.Join(tiles[3].DOScale(1f, 0.10f));
-        return s;
-    }
-
-    private void CompleteAndOpenHome()
-    {
-        _seq?.Kill(); _seq = null;
-
-        DOVirtual.DelayedCall(closeDelay, () =>
-        {
-            if (fadeOut && _cg)
-            {
-                _cg.DOFade(0f, fadeDuration)
-                   .SetUpdate(useUnscaledTime)
-                   .OnComplete(FinalizeClose);
-            }
-            else FinalizeClose();
-        }).SetUpdate(useUnscaledTime);
-    }
-
-    private void FinalizeClose()
-    {
         gameObject.SetActive(false);
+        SetImmediateProgress(0f);
+    }
 
-        // Chỉ bật home nếu có gán; khuyến nghị để trống và dùng onCompleted để gọi GameManager.
-        if (homePanel) homePanel.SetActive(true);
+    public IEnumerator LoadBootAsync(
+        string[] additiveScenes,
+        string[] resourcePaths,
+        Action onDone = null
+    )
+    {
+        gameObject.SetActive(true);
+        float t0 = Time.unscaledTime;
 
-        onCompleted?.Invoke();
+        var sceneList = additiveScenes != null ? additiveScenes : Array.Empty<string>();
+        var resList = resourcePaths != null ? resourcePaths : Array.Empty<string>();
 
-        if (_cg) _cg.alpha = 1f;
+        const float sceneWeight = 0.6f;
+        const float resWeight = 0.4f;
+
+        float sceneChunk = sceneList.Length > 0 ? sceneWeight / sceneList.Length : 0f;
+        float resChunk = resList.Length > 0 ? resWeight / resList.Length : 0f;
+
+        float logicalProgress = 0f;
+        UpdateUI(0f);
+
+        // 1) Load scenes (additive)
+        for (int i = 0; i < sceneList.Length; i++)
+        {
+            string sceneName = sceneList[i];
+            AsyncOperation op = SceneManager.LoadSceneAsync(sceneName, LoadSceneMode.Additive);
+            op.allowSceneActivation = true;
+
+            float start = logicalProgress;
+            while (!op.isDone)
+            {
+                float step = Mathf.Clamp01(op.progress / 0.9f);
+                float target = start + step * sceneChunk;
+                SmoothProgressTo(target);
+                yield return null;
+            }
+            logicalProgress = start + sceneChunk;
+            SmoothProgressTo(logicalProgress);
+        }
+
+        // 2) Load Resources
+        var loadedAssets = new List<UnityEngine.Object>(resList.Length);
+        for (int i = 0; i < resList.Length; i++)
+        {
+            string path = resList[i];
+            ResourceRequest req = Resources.LoadAsync<UnityEngine.Object>(path);
+
+            float start = logicalProgress;
+            while (!req.isDone)
+            {
+                float target = start + req.progress * resChunk;
+                SmoothProgressTo(target);
+                yield return null;
+            }
+            loadedAssets.Add(req.asset);
+            logicalProgress = start + resChunk;
+            SmoothProgressTo(logicalProgress);
+        }
+
+        // 3) Đẩy lên 100%
+        SmoothProgressTo(1f);
+        yield return new WaitForSeconds(0.05f);
+        KillProgressTween();
+        SetImmediateProgress(1f);
+
+        onDone?.Invoke();
+
+        // 4) Đảm bảo tối thiểu
+        float elapsed = Time.unscaledTime - t0;
+        if (elapsed < minShowSeconds)
+            yield return new WaitForSecondsRealtime(minShowSeconds - elapsed);
+
+        gameObject.SetActive(false);
+    }
+
+    private void SmoothProgressTo(float target01)
+    {
+        target01 = Mathf.Clamp01(target01);
+        KillProgressTween();
+        _progressTweener = DOTween.To(
+            () => _visualProgress,
+            v => { _visualProgress = v; UpdateUI(_visualProgress); },
+            target01,
+            tweenDuration
+        ).SetUpdate(true); // dùng unscaled time
+    }
+
+    private void SetImmediateProgress(float v)
+    {
+        KillProgressTween();
+        _visualProgress = Mathf.Clamp01(v);
+        UpdateUI(_visualProgress);
+    }
+
+    private void KillProgressTween()
+    {
+        if (_progressTweener != null && _progressTweener.IsActive())
+            _progressTweener.Kill();
+        _progressTweener = null;
+    }
+
+    private void UpdateUI(float v01)
+    {
+        if (progressBar) progressBar.value = v01;
+        if (progressLabel) progressLabel.text = Mathf.RoundToInt(v01 * 100f) + "%";
     }
 }
-    

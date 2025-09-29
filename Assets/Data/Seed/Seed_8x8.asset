@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e3d2686b777de284b86c97932dfa283c, type: 3}
   m_Name: Seed_8x8
   m_EditorClassIdentifier: 
+  shapeId: -1
   columns: 8
   rows: 8
   board:
@@ -20,6 +21,6 @@ MonoBehaviour:
   - column: 0000000101000000
   - column: 0101010000010101
   - column: 0101010000010101
-  - column: 0000000000000000
-  - column: 0000000000000000
-  - column: 0000000000000000
+  - column: 0000000101000000
+  - column: 0000000101000000
+  - column: 0000000101000000

@@ -1,67 +1,57 @@
 ﻿using UnityEngine;
 using UnityEngine.Audio;
 using System.Collections;
-using System.Collections.Generic; // <== thêm
+using System.Collections.Generic;
 
 public class AudioManager : MonoBehaviour
 {
     public static AudioManager Instance { get; private set; }
 
-    [Header("Clips & Mixer")]
     public AudioClip defaultBgm;
     public AudioMixer mixer;
     public string bgmVolumeParam = "BGMVol";
     public string sfxVolumeParam = "SFXVol";
-    [Tooltip("Group đầu ra cho BGM phải thuộc Mixer có expose BGMVol")]
     public AudioMixerGroup musicGroup;
-    [Tooltip("Group đầu ra cho SFX phải thuộc Mixer có expose SFXVol")]
     public AudioMixerGroup sfxGroup;
 
-    [Header("UI / Meta SFX")]
     public AudioClip clickSfx;
     public AudioClip startGameSfx;
+    public AudioClip increaseSfx;
 
-    [Header("Gameplay SFX")]
     public AudioClip pickupSfx;
     public AudioClip dropSfx;
     public AudioClip[] clearComboSfxByTier;
 
-    [Header("Praise SFX")]
-    public AudioClip goodSfx;       // 2
-    public AudioClip greatSfx;      // 3
-    public AudioClip excellentSfx;  // 4
-    public AudioClip fantasticSfx;  // 5
-    public AudioClip legendarySfx;  // 6+
+    public AudioClip goodSfx;
+    public AudioClip greatSfx;
+    public AudioClip excellentSfx;
+    public AudioClip fantasticSfx;
+    public AudioClip legendarySfx;
     public AudioClip unbelievableSfx;
 
-    [Header("Sources")]
-    public AudioSource musicSource;       // loop BGM
-    public AudioSource sfxSource;         // one-shot SFX (giữ lại để tương thích)
+    public AudioSource musicSource;
+    public AudioSource sfxSource;
 
-    [Header("SFX Polyphony & Anti-Spam")]
-    [Tooltip("Số voice SFX có thể phát chồng cùng lúc")]
     public int sfxPolyphony = 8;
-    [Tooltip("Giãn cách phát lại cùng 1 clip (ms) để tránh spam)")]
     public int sameClipCooldownMs = 35;
-    [Tooltip("Jitter cao độ để bớt nhàm chán")]
     public float pitchJitter = 0.08f;
 
-    // PlayerPrefs keys
     public const string KEY_MUSIC = "Audio.MusicEnabled";
     public const string KEY_SFX = "Audio.SfxEnabled";
-    public const string KEY_MUSIC_VOL = "Audio.MusicVol01"; // 0..1
-    public const string KEY_SFX_VOL = "Audio.SfxVol01";     // 0..1
+    public const string KEY_MUSIC_VOL = "Audio.MusicVol01";
+    public const string KEY_SFX_VOL = "Audio.SfxVol01";
+
+    const float DEFAULT_MUSIC_VOL_01 = 0.3162278f;
 
     private bool _musicEnabled = true;
     private bool _sfxEnabled = true;
 
-    [Range(0f, 1f)][SerializeField] private float _musicVolume = 1f;
+    [Range(0f, 1f)][SerializeField] private float _musicVolume = DEFAULT_MUSIC_VOL_01;
     [Range(0f, 1f)][SerializeField] private float _sfxVolume = 1f;
 
-    // ==== NEW: SFX voice pool & anti-spam ====
     private AudioSource[] _sfxVoices;
     private int _sfxVoiceCursor = 0;
-    private readonly Dictionary<AudioClip, float> _lastPlayTime = new(); // clip -> Time.unscaledTime
+    private readonly Dictionary<AudioClip, float> _lastPlayTime = new();
 
     void Awake()
     {
@@ -71,15 +61,13 @@ public class AudioManager : MonoBehaviour
 
         _musicEnabled = PlayerPrefs.GetInt(KEY_MUSIC, 1) == 1;
         _sfxEnabled = PlayerPrefs.GetInt(KEY_SFX, 1) == 1;
-        _musicVolume = PlayerPrefs.GetFloat(KEY_MUSIC_VOL, 1f);
+        _musicVolume = PlayerPrefs.GetFloat(KEY_MUSIC_VOL, DEFAULT_MUSIC_VOL_01);
         _sfxVolume = PlayerPrefs.GetFloat(KEY_SFX_VOL, 1f);
 
         if (musicSource && musicGroup) musicSource.outputAudioMixerGroup = musicGroup;
         if (sfxSource && sfxGroup) sfxSource.outputAudioMixerGroup = sfxGroup;
 
-        // NEW: tạo voice pool
         BuildSfxVoices();
-
         UpdateMusicGain();
         UpdateSfxGain();
     }
@@ -91,7 +79,6 @@ public class AudioManager : MonoBehaviour
 
     private void BuildSfxVoices()
     {
-        // tái dùng sfxSource làm voice[0] để tương thích
         sfxPolyphony = Mathf.Max(1, sfxPolyphony);
         _sfxVoices = new AudioSource[sfxPolyphony];
         for (int i = 0; i < sfxPolyphony; i++)
@@ -158,7 +145,6 @@ public class AudioManager : MonoBehaviour
         mixer.SetFloat(sfxVolumeParam, Volume01ToDb(v));
     }
 
-    // ===== Settings API =====
     public void SetMusicEnabled(bool on)
     {
         _musicEnabled = on;
@@ -205,12 +191,10 @@ public class AudioManager : MonoBehaviour
     public bool IsMusicEnabled() => _musicEnabled;
     public bool IsSfxEnabled() => _sfxEnabled;
 
-    // ===== NEW: Play helpers với voice pool & cooldown =====
     private void PlayVar(AudioClip clip, float vol = 1f)
     {
         if (!_sfxEnabled || clip == null || _sfxVoices == null || _sfxVoices.Length == 0) return;
 
-        // chống spam cùng clip quá dày
         float now = Time.unscaledTime;
         if (_lastPlayTime.TryGetValue(clip, out float last))
         {
@@ -218,7 +202,6 @@ public class AudioManager : MonoBehaviour
         }
         _lastPlayTime[clip] = now;
 
-        // round-robin voice
         var src = _sfxVoices[_sfxVoiceCursor];
         _sfxVoiceCursor = (_sfxVoiceCursor + 1) % _sfxVoices.Length;
 
@@ -230,8 +213,9 @@ public class AudioManager : MonoBehaviour
 
     public void PlayClick() => PlayVar(clickSfx, 0.9f);
     public void PlayStartGame() => PlayVar(startGameSfx, 1f);
-    public void PlayPickup() => PlayVar(pickupSfx, 0.9f);     // NEW
-    public void PlayDrop() => PlayVar(dropSfx, 1.0f);       // NEW
+    public void PlayIncrease() => PlayVar(increaseSfx, 1f);
+    public void PlayPickup() => PlayVar(pickupSfx, 0.9f);
+    public void PlayDrop() => PlayVar(dropSfx, 1f);
 
     public void PlayPraiseForLines(int linesCleared)
     {
@@ -247,7 +231,7 @@ public class AudioManager : MonoBehaviour
         PlayVar(praise, 1f);
     }
 
-    public void PlayUnbelievable() // NEW: bonus clear sạch bảng
+    public void PlayUnbelievable()
     {
         PlayVar(unbelievableSfx, 1f);
     }
@@ -259,13 +243,12 @@ public class AudioManager : MonoBehaviour
         musicSource.clip = clip ? clip : defaultBgm;
         EnsureBgmPlaying();
     }
+
     public void PlayComboTier(int comboLevel)
     {
         if (!_sfxEnabled || clearComboSfxByTier == null || clearComboSfxByTier.Length == 0) return;
-
         int idx = Mathf.Clamp(comboLevel - 1, 0, clearComboSfxByTier.Length - 1);
         var clip = clearComboSfxByTier[idx];
         PlayVar(clip, 1f);
     }
-
 }

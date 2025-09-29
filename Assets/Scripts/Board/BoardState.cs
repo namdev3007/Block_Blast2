@@ -5,19 +5,31 @@ public class BoardState
 {
     public readonly int Width;
     public readonly int Height;
-    private readonly bool[] _occupied; // r*Width + c
+
+    private readonly bool[] _occupied;   // r*Width + c
+    private readonly int[] _variant;    // song song với occupied; -1 nếu trống
 
     public BoardState(int width, int height)
     {
         Width = width;
         Height = height;
         _occupied = new bool[width * height];
+        _variant = new int[width * height];
+        for (int i = 0; i < _variant.Length; i++) _variant[i] = -1;
     }
+
+    private int Idx(int r, int c) => r * Width + c;
 
     public bool IsOccupied(int r, int c)
     {
         if (r < 0 || r >= Height || c < 0 || c >= Width) return false;
-        return _occupied[r * Width + c];
+        return _occupied[Idx(r, c)];
+    }
+
+    public int GetVariant(int r, int c)
+    {
+        if (r < 0 || r >= Height || c < 0 || c >= Width) return -1;
+        return _variant[Idx(r, c)];
     }
 
     public bool CanPlace(ShapeData shape, int anchorRow, int anchorCol)
@@ -33,13 +45,16 @@ public class BoardState
         return true;
     }
 
-    public void Place(ShapeData shape, int anchorRow, int anchorCol)
+    /// <summary>Đặt và ghi variant cho từng ô.</summary>
+    public void Place(ShapeData shape, int anchorRow, int anchorCol, int variantIndex)
     {
         foreach (var cell in shape.GetFilledCells())
         {
             int r = anchorRow + cell.x;
             int c = anchorCol + cell.y;
-            _occupied[r * Width + c] = true;
+            int i = Idx(r, c);
+            _occupied[i] = true;
+            _variant[i] = variantIndex;
         }
     }
 
@@ -47,14 +62,14 @@ public class BoardState
     public bool IsRowFull(int r)
     {
         for (int c = 0; c < Width; c++)
-            if (!_occupied[r * Width + c]) return false;
+            if (!_occupied[Idx(r, c)]) return false;
         return true;
     }
 
     public bool IsColFull(int c)
     {
         for (int r = 0; r < Height; r++)
-            if (!_occupied[r * Width + c]) return false;
+            if (!_occupied[Idx(r, c)]) return false;
         return true;
     }
 
@@ -77,13 +92,21 @@ public class BoardState
     public void ClearRow(int r)
     {
         for (int c = 0; c < Width; c++)
-            _occupied[r * Width + c] = false;
+        {
+            int i = Idx(r, c);
+            _occupied[i] = false;
+            _variant[i] = -1;
+        }
     }
 
     public void ClearCol(int c)
     {
         for (int r = 0; r < Height; r++)
-            _occupied[r * Width + c] = false;
+        {
+            int i = Idx(r, c);
+            _occupied[i] = false;
+            _variant[i] = -1;
+        }
     }
 
     public void ClearLines(IEnumerable<int> fullRows, IEnumerable<int> fullCols)
@@ -94,10 +117,29 @@ public class BoardState
             foreach (var c in fullCols) ClearCol(c);
     }
 
-    // ✅ API set hợp lệ cho seed
-    public void SetOccupied(int r, int c, bool value)
+    // === Seed & serialize helpers ===
+    public void SetOccupied(int r, int c, bool value, int variantIndex = -1)
     {
         if (r < 0 || r >= Height || c < 0 || c >= Width) return;
-        _occupied[r * Width + c] = value;
+        int i = Idx(r, c);
+        _occupied[i] = value;
+        _variant[i] = value ? variantIndex : -1;
+    }
+
+    public void CopyTo(out bool[] occ, out int[] varr)
+    {
+        int n = Width * Height;
+        occ = new bool[n];
+        varr = new int[n];
+        _occupied.CopyTo(occ, 0);
+        _variant.CopyTo(varr, 0);
+    }
+
+    public void LoadFrom(bool[] occ, int[] varr)
+    {
+        int n = Width * Height;
+        if (occ == null || varr == null || occ.Length != n || varr.Length != n) return;
+        occ.CopyTo(_occupied, 0);
+        varr.CopyTo(_variant, 0);
     }
 }

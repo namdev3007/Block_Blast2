@@ -11,6 +11,4 @@ public class SkinProvider : MonoBehaviour
     public Sprite GetTileSprite(int variantIndex) =>
         current ? current.GetVariant(variantIndex) : null;
 
-    public Sprite GetBoardCellNormal() =>
-        current ? current.boardCellNormal : null;
 }

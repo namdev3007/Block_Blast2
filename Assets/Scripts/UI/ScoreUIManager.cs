@@ -1,6 +1,6 @@
 ﻿using System.Collections;
 using UnityEngine;
-using TMPro; // << IMPORTANT
+using TMPro;
 
 public class ScoreUIManager : MonoBehaviour
 {
@@ -11,66 +11,62 @@ public class ScoreUIManager : MonoBehaviour
     public TextMeshProUGUI scoreText;
     public TextMeshProUGUI highScoreText;
 
-    [Header("Prefs / Keys")]
-    [SerializeField] private string highScoreKey = "HighScore";
-
     [Header("Animation")]
-    [Tooltip("Duration for score tween (UI count up).")]
+    [Tooltip("Thời gian tween đếm số điểm UI.")]
     [Range(0.05f, 1.0f)] public float scoreTweenTime = 0.25f;
-    [Tooltip("Scale for high score pulse.")]
+    [Tooltip("Scale khi pulse high score.")]
     [Range(1f, 2.5f)] public float highPulseScale = 1.15f;
     [Range(0.05f, 0.35f)] public float highPulseTime = 0.12f;
 
     private int _displayedScore;
-    private int _highScore;
-
     private Coroutine _scoreTweenCo;
     private Coroutine _pulseCo;
 
     private void OnEnable()
     {
         if (gameScore != null)
+        {
             gameScore.Scored += OnScored;
+            gameScore.HighScoreChanged += OnHighScoreChanged;
+        }
     }
 
     private void OnDisable()
     {
         if (gameScore != null)
+        {
             gameScore.Scored -= OnScored;
+            gameScore.HighScoreChanged -= OnHighScoreChanged;
+        }
     }
 
     private void Start()
     {
-        _highScore = PlayerPrefs.GetInt(highScoreKey, 0);
-
         _displayedScore = gameScore != null ? gameScore.TotalScore : 0;
         SetText(scoreText, Format(_displayedScore));
-        SetText(highScoreText, Format(_highScore));
+        SetText(highScoreText, Format(gameScore != null ? gameScore.HighScore : 0));
     }
 
     private void OnScored(ScoreResult r)
     {
+        if (gameScore == null) return;
         int target = gameScore.TotalScore;
 
-        // tween score text
         if (_scoreTweenCo != null) StopCoroutine(_scoreTweenCo);
         _scoreTweenCo = StartCoroutine(AnimateScore(_displayedScore, target, scoreTweenTime));
-
-        // high score
-        if (target > _highScore)
-        {
-            _highScore = target;
-            PlayerPrefs.SetInt(highScoreKey, _highScore);
-            PlayerPrefs.Save();
-            SetText(highScoreText, Format(_highScore));
-            Pulse(highScoreText != null ? highScoreText.rectTransform : null);
-        }
     }
 
-    // tween số điểm hiển thị
+    private void OnHighScoreChanged(int newHigh)
+    {
+        SetText(highScoreText, Format(newHigh));
+        Pulse(highScoreText != null ? highScoreText.rectTransform : null);
+    }
+
+    // === Tween số điểm hiển thị ===
     private IEnumerator AnimateScore(int from, int to, float duration)
     {
         _displayedScore = from;
+
         if (duration <= 0f)
         {
             _displayedScore = to;
@@ -90,10 +86,12 @@ public class ScoreUIManager : MonoBehaviour
 
         _displayedScore = to;
         SetText(scoreText, Format(_displayedScore));
+        _scoreTweenCo = null;
     }
 
     private float EaseOutQuad(float x) => 1f - (1f - x) * (1f - x);
 
+    // === Pulse HighScore ===
     private void Pulse(RectTransform rt)
     {
         if (rt == null) return;
@@ -128,14 +126,14 @@ public class ScoreUIManager : MonoBehaviour
         _pulseCo = null;
     }
 
+    // === Helpers ===
     private static void SetText(TextMeshProUGUI t, string s) { if (t) t.text = s; }
     private static string Format(int value) => value.ToString("N0");
 
-    public void ResetHighScore()
+    // === UI Hook: gọi từ Button để reset High Score ===
+    public void ResetHighScoreUI()
     {
-        _highScore = 0;
-        PlayerPrefs.SetInt(highScoreKey, 0);
-        PlayerPrefs.Save();
-        SetText(highScoreText, Format(_highScore));
+        if (gameScore == null) return;
+        gameScore.ResetHighScore(); // HighScoreChanged sẽ cập nhật UI + pulse
     }
 }

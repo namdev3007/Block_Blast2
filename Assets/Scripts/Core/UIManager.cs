@@ -9,6 +9,7 @@ public class UIManager : MonoBehaviour
     public GameObject settingPanel;
     public GameObject revivePanel;
     public GameObject gameOverPanel;
+    public GameObject bestScorePanel;
 
     [Header("Buttons")]
     public Button btnStart;
@@ -19,37 +20,44 @@ public class UIManager : MonoBehaviour
 
     private void Awake()
     {
-        if (btnStart) btnStart.onClick.AddListener(() => GameManager.Instance?.OnStartButtonPressed());
+        if (btnStart) btnStart.onClick.AddListener(() =>
+        {
+            AudioManager.Instance?.PlayClick();
+            GameManager.Instance?.ContinueFromSave();
+        });
+
         if (btnSetting) btnSetting.onClick.AddListener(() =>
         {
             AudioManager.Instance?.PlayClick();
             GameManager.Instance?.Pause();
             ShowSettingPanel(true);
         });
+
         if (btnExitSetting) btnExitSetting.onClick.AddListener(() =>
         {
             AudioManager.Instance?.PlayClick();
             GameManager.Instance?.Resume();
             ShowSettingPanel(false);
         });
+
         if (btnRestart) btnRestart.onClick.AddListener(() =>
         {
             AudioManager.Instance?.PlayClick();
             GameManager.Instance?.Restart();
             ShowSettingPanel(false);
         });
+
         if (btnHome) btnHome.onClick.AddListener(() =>
         {
             AudioManager.Instance?.PlayClick();
             GameManager.Instance?.GoHome();
         });
 
-        // Khởi tạo ẩn
         ShowRevive(false);
         ShowGameOver(false);
+        ShowBestScore(false);
     }
 
-    // ===== Public API =====
     public void OnGameStateChanged(GameState s)
     {
         switch (s)
@@ -60,6 +68,7 @@ public class UIManager : MonoBehaviour
                 ShowSettingPanel(false);
                 ShowRevive(false);
                 ShowGameOver(false);
+                ShowBestScore(false);
                 break;
 
             case GameState.Playing:
@@ -68,6 +77,7 @@ public class UIManager : MonoBehaviour
                 ShowSettingPanel(false);
                 ShowRevive(false);
                 ShowGameOver(false);
+                ShowBestScore(false);
                 break;
 
             case GameState.Paused:
@@ -78,18 +88,27 @@ public class UIManager : MonoBehaviour
 
             case GameState.GameOver:
                 ShowHome(false);
-                ShowHUD(false);
+                ShowHUD(true);
                 ShowSettingPanel(false);
+                break;
+
+            case GameState.BestScore:
+                ShowHome(false);
+                ShowHUD(true);
+                ShowSettingPanel(false);
+                ShowRevive(false);
+                ShowGameOver(false);
+                ShowBestScore(true);
                 break;
         }
     }
 
-    // ===== Toggle helpers =====
     public void ShowHome(bool on) => ToggleGO(homePanel, on);
     public void ShowHUD(bool on) => ToggleGO(hudPanel, on);
     public void ShowSettingPanel(bool on) => ToggleGO(settingPanel, on);
     public void ShowRevive(bool on) => ToggleGO(revivePanel, on);
     public void ShowGameOver(bool on) => ToggleGO(gameOverPanel, on);
+    public void ShowBestScore(bool on) => ToggleGO(bestScorePanel, on);
 
     private void ToggleGO(GameObject go, bool on)
     {

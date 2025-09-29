@@ -3,6 +3,8 @@
 [CreateAssetMenu(fileName = "NewShapeData", menuName = "Data/Shape Data")]
 public class ShapeData : ScriptableObject
 {
+    public int shapeId = -1;
+
     [System.Serializable]
     public class Row
     {

@@ -361,12 +361,6 @@ public class GridSquareView : MonoBehaviour
         _linePreviewOn = false;
         _activeHiddenByLinePreview = false;
     }
-
-    // ================= Intro bằng SKIN SPRITE =================
-
-    /// <summary>
-    /// Flash intro nhưng dùng sprite (thường lấy từ SkinProvider). Không chiếm ô.
-    /// </summary>
     public void PlayIntroFlashWithSprite(Sprite skinSprite, float delay, float fadeIn = 0.10f, float fadeOut = 0.20f, float maxAlpha = 1f)
     {
         if (!introWaveImage) return;

@@ -534,6 +534,39 @@ public class BoardRuntime : MonoBehaviour
         }
     }
 
+    public void EnsureGridBuiltForLoad() => EnsureGridBuilt();
+
+    public void LoadFromSave(GameSaveV1 s)
+    {
+        if (gridView == null) return;
+        int W = gridView.columns, H = gridView.rows;
+        if (s.cols != W || s.rows != H) { Debug.LogWarning("Save size mismatch"); }
+
+        // reset previews/ghosts
+        ClearPreview();
+        ClearGameOverGhosts(true, 0f);
+
+        // nạp state
+        State = new BoardState(W, H);
+        State.LoadFrom(s.occupied, s.variants);
+
+        // vẽ lại
+        for (int r = 0; r < H; r++)
+            for (int c = 0; c < W; c++)
+            {
+                int idx = r * W + c;
+                bool occ = State.IsOccupied(r, c);
+                var cell = gridView.Cells[idx];
+                if (occ)
+                {
+                    int v = State.GetVariant(r, c);
+                    var sp = SpriteFromVariant(v);
+                    cell.SetOccupied(true, sp);
+                }
+                else cell.SetOccupied(false, null);
+            }
+    }
+
     public void ClearGameOverGhosts(bool instant = false, float fadeOut = 0.15f)
     {
         if (gridView == null || gridView.Cells == null) return;

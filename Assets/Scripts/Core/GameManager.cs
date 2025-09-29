@@ -1,32 +1,40 @@
 ﻿using System;
+using System.Collections;
 using UnityEngine;
 
-public enum GameState { Boot, Playing, Paused, GameOver }
+public enum GameState { Boot, Playing, Paused, GameOver, BestScore }
 
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
-    [Header("Refs")]
     public BoardRuntime board;
     public ShapePalette palette;
     public GameScore score;
-    public PopupManager popup;   // optional
-    public UIManager ui;         // gán trong Scene
-    public RevivePanel revivePanel; // <-- kéo script RevivePanel vào đây trong Inspector
+    public PopupManager popup;
+    public UIManager ui;
+    public RevivePanel revivePanel;
 
-    [Header("Options")]
-    public bool autoStartOnAwake = false;   // để FALSE: vào Home trước
+    public bool autoStartOnAwake = false;
     public float reviveCountdownSeconds = 5f;
 
+    [Header("End Wave")]
+    public float endWaveRowStep = 0.05f;
+    public float endWaveColJitter = 0.01f;
+    public float endWaveAlpha = 0.85f;
+    public float endWaveExtraWait = 0.30f;
+    public bool endWaveOverwriteOnOccupied = true;
+
+    public bool ReviveUsed => reviveUsed;
     public GameState State { get; private set; } = GameState.Boot;
 
     public event Action<GameState> GameStateChanged;
     public event Action GameStateWillChange;
     public event Action GameStarted;
 
-    // revive guard
     private bool reviveUsed = false;
+    private int _hsAtRunStart;
+    private bool _endFlowRunning;
 
     void Awake()
     {
@@ -47,58 +55,58 @@ public class GameManager : MonoBehaviour
         else GoHome();
     }
 
-    // ====== HOME ======
     public void GoHome()
     {
         Time.timeScale = 1f;
         reviveUsed = false;
+        _endFlowRunning = false;
         SetState(GameState.Boot);
         ui?.ShowHome(true);
         ui?.ShowHUD(false);
         ui?.ShowSettingPanel(false);
         ui?.ShowRevive(false);
         ui?.ShowGameOver(false);
+        ui?.ShowBestScore(false);
+        board?.ClearGameOverGhosts(true, 0f);
     }
 
-    // Gán hàm này vào nút Start ở màn hình Home
     public void OnStartButtonPressed()
     {
         AudioManager.Instance?.PlayClick();
         StartNewGame();
     }
 
-    // ====== GAME FLOW ======
     public void StartNewGame(int? seed = null)
     {
-        // Reset revive
+        SaveService.Clear();
         reviveUsed = false;
-
-        // Reset score
+        _endFlowRunning = false;
         if (score != null) score.ResetAll();
-
-        // Reset board + seed
         if (board != null)
         {
             board.SeedRandomOccupied(0, 0, true);
             if (board.seedAtStart)
                 board.ResetAndSeed(board.initialMinOccupied, board.initialMaxOccupied, board.avoidFullRowsCols);
-
             board.PlayIntroWave();
+            board.ClearGameOverGhosts(true, 0f);
         }
-
-        // Refill hand
         if (palette != null) palette.Refill();
-
+        _hsAtRunStart = (score != null) ? score.HighScore : 0;
         Time.timeScale = 1f;
         SetState(GameState.Playing);
         GameStarted?.Invoke();
-
-        // UI
         ui?.ShowHome(false);
         ui?.ShowHUD(true);
         ui?.ShowSettingPanel(false);
         ui?.ShowRevive(false);
         ui?.ShowGameOver(false);
+        ui?.ShowBestScore(false);
+    }
+
+    public void SaveSnapshotNow()
+    {
+        var snap = SaveService.Capture(this, board, palette);
+        SaveService.Save(snap);
     }
 
     public void Pause()
@@ -132,60 +140,165 @@ public class GameManager : MonoBehaviour
 
     public void OnNoMovesLeft()
     {
-        if (reviveUsed) { Debug.Log("[GM] Revive already used"); GoGameOver(); return; }
-        if (revivePanel == null) { Debug.LogWarning("[GM] revivePanel NULL"); GoGameOver(); return; }
-        if (ui == null) { Debug.LogWarning("[GM] ui NULL"); GoGameOver(); return; }
+        if (_endFlowRunning) return;
+        if (score == null)
+        {
+            StartCoroutine(CoEndWaveThenGameOver());
+            return;
+        }
 
+        int cur = score.TotalScore;
+
+        if (cur > _hsAtRunStart)
+        {
+            StartCoroutine(CoEndWaveThenBestScore());
+            return;
+        }
+
+        if (!ShouldOfferRevive())
+        {
+            StartCoroutine(CoEndWaveThenGameOver());
+            return;
+        }
+
+        if (revivePanel == null || ui == null)
+        {
+            StartCoroutine(CoEndWaveThenGameOver());
+            return;
+        }
+
+        StartCoroutine(CoEndWaveThenRevive());
+    }
+
+    private IEnumerator CoEndWaveThenRevive()
+    {
+        _endFlowRunning = true;
+        RunEndWaveOnce();
+        yield return new WaitForSeconds(ComputeEndWaveDuration());
         Time.timeScale = 0f;
-        ui.ShowHUD(false);
         ui.ShowRevive(true);
         revivePanel.transform.SetAsLastSibling();
         revivePanel.Show(reviveCountdownSeconds);
+        _endFlowRunning = false;
     }
 
+    private IEnumerator CoEndWaveThenGameOver()
+    {
+        _endFlowRunning = true;
+        RunEndWaveOnce();
+        yield return new WaitForSeconds(ComputeEndWaveDuration());
+        GoGameOver();
+        _endFlowRunning = false;
+    }
 
-    // ====== REVIVE HANDLERS ======
+    private IEnumerator CoEndWaveThenBestScore()
+    {
+        _endFlowRunning = true;
+        RunEndWaveOnce();
+        yield return new WaitForSeconds(ComputeEndWaveDuration());
+        GoBestScore();
+        _endFlowRunning = false;
+    }
+
+    private void RunEndWaveOnce()
+    {
+        if (board == null) return;
+        Time.timeScale = 1f;
+        board.ClearGameOverGhosts(true, 0f);
+        board.PlayGameOverWave(endWaveRowStep, endWaveColJitter, endWaveAlpha, endWaveOverwriteOnOccupied);
+    }
+
+    private float ComputeEndWaveDuration()
+    {
+        int rows = (board != null && board.gridView != null) ? board.gridView.rows : 0;
+        return Mathf.Max(0f, rows * endWaveRowStep + endWaveExtraWait);
+    }
+
     private void OnReviveAccepted()
     {
-        // chỉ được 1 lần trong cả ván
         reviveUsed = true;
-
-        // Ẩn revive
         ui?.ShowRevive(false);
         revivePanel?.Hide();
-
-        // Xoá ghost
-        board?.ClearGameOverGhosts(instant: false, fadeOut: 0.2f);
-
-        // Refill 3 block mới (giả định Refill sẽ lấp các slot trống tới 3)
+        board?.ClearGameOverGhosts(false, 0.2f);
         palette?.Refill();
-
-        // Trở lại Playing
         Time.timeScale = 1f;
         SetState(GameState.Playing);
         ui?.ShowHUD(true);
-
-        AudioManager.Instance?.PlayStartGame(); // nếu có SFX revive/start
+        AudioManager.Instance?.PlayStartGame();
     }
 
     private void OnReviveTimedOut()
     {
-        // Hết giờ không bấm -> GameOver
         ui?.ShowRevive(false);
         revivePanel?.Hide();
         GoGameOver();
     }
 
-    // ====== GAME OVER ======
     private void GoGameOver()
     {
-        // đảm bảo dọn revive UI nếu đang mở
         revivePanel?.Hide();
         ui?.ShowRevive(false);
-
-        Time.timeScale = 1f; // tuỳ bạn muốn giữ 0f hay 1f ở màn GameOver UI
+        Time.timeScale = 1f;
         SetState(GameState.GameOver);
-
         ui?.ShowGameOver(true);
+    }
+
+    private void GoBestScore()
+    {
+        revivePanel?.Hide();
+        ui?.ShowRevive(false);
+        Time.timeScale = 1f;
+        SetState(GameState.BestScore);
+        ui?.ShowGameOver(false);
+        ui?.ShowBestScore(true);
+    }
+
+    public void ContinueFromSave()
+    {
+        if (!SaveService.TryLoad(out var s))
+        {
+            StartNewGame();
+            return;
+        }
+
+        Time.timeScale = 1f;
+        SetState(GameState.Playing);
+
+        if (board != null)
+        {
+            board.EnsureGridBuiltForLoad();
+            board.LoadFromSave(s);
+            board.ClearGameOverGhosts(true, 0f);
+        }
+        if (palette != null) palette.RestoreFromSave(s);
+        if (score != null) score.SetTotalAndCombo(s.scoreTotal, s.comboCurrent);
+        reviveUsed = s.reviveUsed;
+        _hsAtRunStart = (score != null) ? score.HighScore : 0;
+        ui?.ShowHome(false);
+        ui?.ShowHUD(true);
+        ui?.ShowSettingPanel(false);
+        ui?.ShowRevive(false);
+        ui?.ShowGameOver(false);
+        ui?.ShowBestScore(false);
+        GameStarted?.Invoke();
+    }
+
+    void OnApplicationPause(bool pause)
+    {
+        if (pause) SaveSnapshotNow();
+    }
+
+    void OnApplicationQuit()
+    {
+        SaveSnapshotNow();
+    }
+
+    private bool ShouldOfferRevive()
+    {
+        if (reviveUsed) return false;
+        if (score == null) return false;
+        int hs = score.HighScore;
+        int cur = score.TotalScore;
+        return cur > (hs * 0.5f);
     }
 }
