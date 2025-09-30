@@ -1,15 +1,13 @@
 using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
+using DG.Tweening;
 
 public class GameOverPanel : MonoBehaviour
 {
-    [Header("Refs")]
     public TextMeshProUGUI lastScoreText;
     public TextMeshProUGUI highScoreText;
 
-
-    [Header("Buttons (optional)")]
     public Button btnRestart;
 
     private void Awake()
@@ -30,9 +28,22 @@ public class GameOverPanel : MonoBehaviour
         int last = (score != null) ? score.TotalScore : 0;
         int high = (score != null) ? score.HighScore : 0;
 
-        SetText(lastScoreText, Format(last));
+        AnimateScore(lastScoreText, last, 1f);
         SetText(highScoreText, Format(high));
+    }
 
+    private void AnimateScore(TextMeshProUGUI text, int targetValue, float duration)
+    {
+        if (text == null) return;
+        text.text = "0";
+
+        AudioManager.Instance?.PlayIncrease();
+
+        DOTween.To(() => 0, x =>
+        {
+            text.text = x.ToString("N0");
+        }, targetValue, duration)
+        .SetEase(Ease.OutCubic);
     }
 
     private void OnClickRestart()

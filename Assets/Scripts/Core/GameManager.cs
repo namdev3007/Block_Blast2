@@ -167,10 +167,17 @@ public class GameManager : MonoBehaviour
 
     public void SaveSnapshotNow()
     {
+        if (score == null || score.TotalScore <= 0)
+        {
+            SaveService.Clear();
+            return;
+        }
+
         var snap = SaveService.Capture(this, board, palette);
         SaveService.Save(snap);
     }
 
+        
     public void Pause()
     {
         if (State != GameState.Playing) return;
@@ -299,7 +306,7 @@ public class GameManager : MonoBehaviour
 
     public void ContinueFromSave()
     {
-        if (!SaveService.TryLoad(out var s))
+        if (!SaveService.TryLoad(out var s) || s == null || s.scoreTotal <= 0)
         {
             StartNewGame();
             return;
@@ -328,6 +335,7 @@ public class GameManager : MonoBehaviour
         ui?.ShowBestScore(false);
         GameStarted?.Invoke();
     }
+
 
     void OnApplicationPause(bool pause) { if (pause) SaveSnapshotNow(); }
     void OnApplicationQuit() { SaveSnapshotNow(); }

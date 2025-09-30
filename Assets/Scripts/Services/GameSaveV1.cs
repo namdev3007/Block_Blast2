@@ -76,10 +76,15 @@ public static class SaveService
 
     public static void Save(GameSaveV1 data)
     {
-        if (data == null) return;
+        if (data == null || data.scoreTotal <= 0)
+        {
+            Clear();
+            return;
+        }
         PlayerPrefs.SetString(KEY, JsonUtility.ToJson(data));
         PlayerPrefs.Save();
     }
+
 
     public static bool TryLoad(out GameSaveV1 data)
     {
