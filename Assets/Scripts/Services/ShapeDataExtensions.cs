@@ -3,7 +3,6 @@ using UnityEngine;
 
 public static class ShapeDataExtensions
 {
-    // Giữ lại dạng IEnumerable để ai cần có thể foreach trực tiếp
     public static IEnumerable<Vector2Int> GetFilledCells(this ShapeData data)
     {
         if (data == null || data.board == null) yield break;
@@ -14,7 +13,6 @@ public static class ShapeDataExtensions
                     yield return new Vector2Int(r, c);
     }
 
-    // Nếu bạn cần một List (để .Count là thuộc tính), dùng hàm này
     public static List<Vector2Int> GetFilledCellsList(this ShapeData data)
     {
         var list = new List<Vector2Int>();

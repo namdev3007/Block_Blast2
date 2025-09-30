@@ -8,8 +8,6 @@ public class AudioManager : MonoBehaviour
     public static AudioManager Instance { get; private set; }
 
     public AudioClip defaultBgm;
-    public AudioClip homeBgm;
-    public AudioClip gameplayBgm;
 
     public AudioMixer mixer;
     public string bgmVolumeParam = "BGMVol";
@@ -106,7 +104,7 @@ public class AudioManager : MonoBehaviour
         yield return null;
         UpdateMusicGain();
         UpdateSfxGain();
-        PlayMenuBgm();
+        PlayBgm(defaultBgm, true); // thay vì PlayMenuBgm()
     }
 
     private void EnsureBgmPlaying()
@@ -236,16 +234,6 @@ public class AudioManager : MonoBehaviour
         musicSource.loop = loop;
         musicSource.clip = clip ? clip : defaultBgm;
         EnsureBgmPlaying();
-    }
-
-    public void PlayMenuBgm()
-    {
-        PlayBgm(homeBgm ? homeBgm : defaultBgm, true);
-    }
-
-    public void PlayGameplayBgm()
-    {
-        PlayBgm(gameplayBgm ? gameplayBgm : defaultBgm, true);
     }
 
     public void PlayComboTier(int comboLevel)

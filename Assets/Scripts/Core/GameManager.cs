@@ -27,10 +27,8 @@ public class GameManager : MonoBehaviour
     public float minLoadingSeconds = 1.2f;
     public bool preloadAudio = true;
 
-    // CHANGED: không build grid ở boot
     public bool buildGridOnBoot = false;
 
-    public AudioClip startGameSfx;
 
     public bool ReviveUsed => reviveUsed;
     public GameState State { get; private set; } = GameState.Boot;
@@ -164,8 +162,6 @@ public class GameManager : MonoBehaviour
         ui?.ShowGameOver(false);
         ui?.ShowBestScore(false);
 
-        if (startGameSfx && AudioManager.Instance)
-            AudioManager.Instance.startGameSfx = startGameSfx;
         AudioManager.Instance?.PlayStartGame();
     }
 

@@ -3,11 +3,11 @@
 [System.Serializable]
 public struct ClassWeights
 {
-    [Range(0f, 5f)] public float small;   // 1–3 cells
-    [Range(0f, 5f)] public float medium;  // 4–5 cells
-    [Range(0f, 5f)] public float large;   // 6+ cells
-    [Range(0f, 5f)] public float line;    // 1xN hoặc Nx1
-    [Range(0f, 5f)] public float square;  // full 2x2, 3x3
+    [Range(0f, 5f)] public float small;
+    [Range(0f, 5f)] public float medium;
+    [Range(0f, 5f)] public float large;
+    [Range(0f, 5f)] public float line;
+    [Range(0f, 5f)] public float square;
 
     public void Normalize()
     {
@@ -67,14 +67,35 @@ public class ShapeSpawnConfig : ScriptableObject
     // ---------- Scoring weights ----------
     [Header("Scoring (điểm đánh giá ứng viên)")]
     public float wPlaceable = 2f;
-    public float wPlacementCount = 0.5f;
+
+    // ↓ Giảm thiên vị khối nhỏ (ít “ăn” điểm vì có quá nhiều vị trí đặt)
+    public float wPlacementCount = 0.2f;    // trước: 0.5
     public int minPlacementsTarget = 2;
     public int maxPlacementsTarget = 8;
+
     public float wLineClear = 3f;
-    public float wArea = 0.05f;
+
+    // ↑ Tăng giá trị diện tích để khối to cạnh tranh hơn
+    public float wArea = 0.10f;             // trước: 0.05
 
     [Tooltip("Ưu tiên giữ chuỗi: số hàng/cột còn thiếu 1 ô sau khi giả lập đặt.")]
     public float wChainPotential = 1.0f;
+
+    // ---------- Scoring: Anti-small bias ----------
+    [Header("Scoring: anti-small bias")]
+    [Tooltip("Phạt khi ô trống còn nhiều mà shape quá nhỏ.")]
+    public float tinyPenalty = 0.8f;
+
+    [Tooltip("Ngưỡng cellcount để xem là 'khối nhỏ' (<=).")]
+    [Min(1)] public int tinyCellThreshold = 3;
+
+    [Tooltip("Chỉ phạt khi bàn đang khá thoáng (>=).")]
+    [Range(0f, 1f)] public float tinyPenaltyFreeBoardMin = 0.45f;
+
+    // ---------- Diminishing returns cho placementCount ----------
+    [Header("PlacementCount diminishing returns")]
+    [Tooltip("Hệ số cong cho placementCount (1 = tuyến tính, <1 = giảm dần).")]
+    [Range(0.25f, 1f)] public float placementCountGamma = 0.65f;
 
     // ---------- Triplet Bag ----------
     [Header("Triplet Bag")]
@@ -109,17 +130,87 @@ public class ShapeSpawnConfig : ScriptableObject
     public bool suddenRequireLineClearEachStep = false;
     [Min(0)] public int suddenCooldownRefills = 2;
 
-    // ---------- Validator ----------
     private void OnValidate()
     {
         maxHandBuildAttempts = Mathf.Max(1, maxHandBuildAttempts);
         samplesPerSlot = Mathf.Max(1, samplesPerSlot);
         topK = Mathf.Max(1, topK);
+
         requiredPlaceableSlots = Mathf.Max(0, requiredPlaceableSlots);
         pityRescueSlots = Mathf.Max(0, pityRescueSlots);
+
         bagCandidateCount = Mathf.Max(1, bagCandidateCount);
         bagMaxBuildTrials = Mathf.Max(10, bagMaxBuildTrials);
+
         holeFillerMaxCells = Mathf.Max(1, holeFillerMaxCells);
         holeFitterSampleShapes = Mathf.Max(1, holeFitterSampleShapes);
+
+        tinyCellThreshold = Mathf.Max(1, tinyCellThreshold);
+    }
+}
+
+/// <summary>
+/// Thống kê đánh giá ứng viên (bạn ánh xạ lại theo hệ thống eval hiện có).
+/// </summary>
+public struct EvalStats
+{
+    public bool placeable;                       // có đặt được ít nhất 1 vị trí
+    public int placementCount;                   // số vị trí có thể đặt
+    public int maxLinesClearedIfBestPlacement;   // số line tối đa nếu đặt tốt nhất
+    public int chainPotential;                   // số hàng/cột còn thiếu 1 ô sau giả lập
+}
+
+public static class SpawnScoring
+{
+    // Gamma squash: đưa x về [0..1], rồi lũy thừa gamma (<1) để “giảm dần lợi ích”.
+    static float SquashWithGamma(int value, int minTarget, int maxTarget, float gamma)
+    {
+        int clamped = Mathf.Clamp(value, minTarget, maxTarget);
+        float t = (maxTarget > minTarget) ? (clamped - minTarget) / (float)(maxTarget - minTarget) : 1f;
+        return Mathf.Pow(Mathf.Clamp01(t), gamma);
+    }
+
+    /// <summary>
+    /// Hàm chấm điểm ứng viên theo cấu hình hiện tại.
+    /// - shapeCellCount: số ô của khối.
+    /// - stats: kết quả eval (đặt được, số vị trí, max lines, chainPotential).
+    /// - cfg: ShapeSpawnConfig (đã set tham số).
+    /// - boardFree01: tỉ lệ ô trống hiện tại (0..1).
+    /// </summary>
+    public static float ScoreCandidate(
+        int shapeCellCount,
+        EvalStats stats,
+        ShapeSpawnConfig cfg,
+        float boardFree01)
+    {
+        float score = 0f;
+
+        // 1) Có đặt được không → điểm nền cao
+        if (stats.placeable)
+            score += cfg.wPlaceable;
+
+        // 2) Số vị trí đặt (giảm dần lợi ích để khối nhỏ bớt lợi thế)
+        float placementFactor = SquashWithGamma(stats.placementCount,
+                                                cfg.minPlacementsTarget,
+                                                cfg.maxPlacementsTarget,
+                                                cfg.placementCountGamma);
+        score += cfg.wPlacementCount * placementFactor;
+
+        // 3) Ăn line tối đa
+        score += cfg.wLineClear * stats.maxLinesClearedIfBestPlacement;
+
+        // 4) Diện tích khối (buff khối to)
+        // Nếu muốn dịu hơn, có thể dùng sqrt:
+        // score += cfg.wArea * Mathf.Sqrt(shapeCellCount);
+        score += cfg.wArea * shapeCellCount;
+
+        // 5) Tiềm năng chuỗi
+        score += cfg.wChainPotential * stats.chainPotential;
+
+        // 6) PHẠT KHỐI RẤT NHỎ KHI BÀN THOÁNG (anti-small bias)
+        if (boardFree01 >= cfg.tinyPenaltyFreeBoardMin && shapeCellCount <= cfg.tinyCellThreshold)
+            score -= cfg.tinyPenalty;
+
+        return score;
     }
 }

@@ -857,16 +857,45 @@ public class ShapePalette : MonoBehaviour
         }
         return e;
     }
+    private float SquashWithGamma(int value, int minTarget, int maxTarget, float gamma)
+    {
+        int clamped = Mathf.Clamp(value, minTarget, maxTarget);
+        float t = (maxTarget > minTarget) ? (clamped - minTarget) / (float)(maxTarget - minTarget) : 1f;
+        return Mathf.Pow(Mathf.Clamp01(t), gamma);
+    }
 
+    private float GetBoardFree01()
+    {
+        if (board == null || board.State == null) return 1f;
+        int H = board.State.Height, W = board.State.Width;
+        int occ = 0;
+        for (int r = 0; r < H; r++)
+            for (int c = 0; c < W; c++)
+                if (board.State.IsOccupied(r, c)) occ++;
+        return 1f - (float)occ / (W * H);
+    }
     private float ScoreShape(Eval e, ShapeData s, List<ShapeData> currentHand)
     {
         float score = 0f;
-        if (e.anyPlaceable) score += config.wPlaceable;
 
-        score += config.wPlacementCount * AdjustToTarget(e.placements, config.minPlacementsTarget, config.maxPlacementsTarget);
+        if (e.anyPlaceable)
+            score += config.wPlaceable;
+
+        float placementFactor = SquashWithGamma(
+            e.placements,
+            config.minPlacementsTarget,
+            config.maxPlacementsTarget,
+            config.placementCountGamma
+        );
+        score += config.wPlacementCount * placementFactor;
+
         score += config.wLineClear * e.maxLineClears;
-        score += config.wChainPotential * e.bestChainPotential;
         score += config.wArea * e.cells;
+        score += config.wChainPotential * e.bestChainPotential;
+
+        float boardFree01 = GetBoardFree01();
+        if (boardFree01 >= config.tinyPenaltyFreeBoardMin && e.cells <= config.tinyCellThreshold)
+            score -= config.tinyPenalty;
 
         int sameArea = 0;
         foreach (var x in currentHand) if (x != null && CountCells(x) == e.cells) sameArea++;
